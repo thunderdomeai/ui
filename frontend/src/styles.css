@@ -1,0 +1,13 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f4f6f9;
+}
+
+.gradient-shell {
+  background: linear-gradient(135deg, rgba(10, 110, 209, 0.06), rgba(12, 178, 218, 0.08));
+}

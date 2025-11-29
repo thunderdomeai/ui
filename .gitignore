@@ -1,0 +1,12 @@
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+.venv/
+__pycache__/
+.DS_Store
+.env
+.env.local
+coverage/
+build/
+sample_userrequirements.json
