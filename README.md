@@ -70,6 +70,58 @@ GitHub token handling
 - Frontend reads `VITE_GITHUB_TOKEN` for branch/env fetches. In Cloud Run, the backend can also inject `window.__UNIFIED_UI_CONFIG__.githubToken` from `DEFAULT_GITHUB_TOKEN`/`GITHUB_TOKEN`.
 - To run locally: create `ui/frontend/.env` with `VITE_GITHUB_TOKEN=<your_pat>` (repo read scope), then `npm run dev`.
 
+Architecture (runtime)
+----------------------
+```
+[Browser SPA]
+    |
+    v
+[Unified UI BFF (FastAPI)]
+    |-- /api/agent-catalog  -> [Thunderagents (Cloud Run)] -> [GCS bucket: thunder_agents_catalog (agents.json)]
+    |-- /api/deploy/...     -> [TriggerService (Cloud Run/API)]
+    |-- /api/mcp/registry   -> [MCP Registry service]
+    |-- /api/web-research   -> [Web Research Agent]
+    |-- /api/cheat-sheet    -> [Cheat Sheet service]
+    |-- /api/login/userinfo -> [MAIN_API_URL]
+    |-- credentials store   -> [/tmp/unified-ui-credentials] (active source/target SA JSON)
+```
+
+Deployment UX flow
+------------------
+```
+Overview -> Onboarding -> Permissions -> Priming -> Deploy
+                                               |
+                                        (requires credentials)
+
+Deploy board:
+    [Agent catalog via /api/agent-catalog]
+        |
+        v
+    Drag agent -> pick branch/env -> waves -> Deploy -> TriggerService jobs
+        |
+        v
+    Logs/status polled via TriggerService + Cloud Logging fetch
+```
+
+Data & storage relationships
+----------------------------
+```
+Thunderagents service
+    |
+    v
+GCS bucket thunder_agents_catalog
+    - agents.json (and legacy repositories.json)
+    - read by Unified UI via /api/agent-catalog proxy
+
+Credentials
+    - Stored server-side under /tmp/unified-ui-credentials (source/target SAs)
+    - Selected active pair gates the Deploy buttons
+
+GitHub tokens
+    - Frontend: VITE_GITHUB_TOKEN (for branch/env fetches)
+    - Backend: DEFAULT_GITHUB_TOKEN/GITHUB_TOKEN -> window.__UNIFIED_UI_CONFIG__.githubToken
+```
+
 Cloud Run usage
 ---------------
 
