@@ -71,6 +71,7 @@ TRIGGERSERVICE_BASE_URL = _normalize_base_url(
 DEFAULT_GITHUB_TOKEN = os.getenv("DEFAULT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or ""
 CREDENTIALS_BUCKET = os.getenv("CREDENTIALS_BUCKET") or ""
 CREDENTIALS_PREFIX = os.getenv("CREDENTIALS_PREFIX", "unified-ui-credentials")
+CREDENTIALS_BUCKET_LOCATION = os.getenv("CREDENTIALS_BUCKET_LOCATION") or "US"
 
 
 HTTPX_TIMEOUT = httpx.Timeout(180.0)
@@ -296,9 +297,17 @@ def _get_gcs_bucket():
         return _gcs_bucket
     try:
         client = storage.Client()
-        _gcs_bucket = client.bucket(CREDENTIALS_BUCKET)
-        if not _gcs_bucket.exists():
-            logger.warning("Credentials bucket %s does not exist or is inaccessible", CREDENTIALS_BUCKET)
+        bucket = client.bucket(CREDENTIALS_BUCKET)
+        if not bucket.exists():
+            try:
+                bucket.create(location=CREDENTIALS_BUCKET_LOCATION)
+                logger.info("Created credential bucket %s in %s", CREDENTIALS_BUCKET, CREDENTIALS_BUCKET_LOCATION)
+            except gcs_exceptions.Conflict:
+                logger.info("Credential bucket %s already exists (created concurrently).", CREDENTIALS_BUCKET)
+            except gcs_exceptions.GoogleAPIError as exc:
+                logger.error("Failed to create credentials bucket %s: %s", CREDENTIALS_BUCKET, exc)
+                raise HTTPException(status_code=500, detail="Unable to create credential bucket.")
+        _gcs_bucket = bucket
     except Exception as exc:
         logger.error("Failed to initialize credentials bucket %s: %s", CREDENTIALS_BUCKET, exc)
         raise HTTPException(status_code=500, detail="Credential bucket is not accessible.")

@@ -28,6 +28,7 @@ Backend (FastAPI)
   - `DEFAULT_GITHUB_TOKEN` / `GITHUB_TOKEN` – optional GitHub token passed to the frontend as `window.__UNIFIED_UI_CONFIG__.githubToken`.
   - `CREDENTIALS_BUCKET` – GCS bucket to persist source/target credential stores (required on Cloud Run to survive restarts; local dev falls back to `/tmp/unified-ui-credentials` if unset).
   - `CREDENTIALS_PREFIX` – optional path prefix inside the bucket for credential objects (default `unified-ui-credentials`).
+  - `CREDENTIALS_BUCKET_LOCATION` – optional bucket location for auto-creation (default `US`); the service will create the bucket if it does not exist and it has permission.
 - Exposes:
   - `GET /` – serves the built React SPA from `ui/frontend/dist`.
   - `GET /healthz` – reports basic wiring/configuration status.
@@ -76,6 +77,7 @@ Credential persistence (GCS)
 ----------------------------
 - Set `CREDENTIALS_BUCKET` (and optionally `CREDENTIALS_PREFIX`) so the credential store is written to GCS and survives Cloud Run restarts/scale-to-zero. Objects written: `<prefix>/source-store.json` and `<prefix>/target-store.json`.
 - Grant the Cloud Run runtime service account access to that bucket (e.g., `roles/storage.objectAdmin` on the bucket). Without access, the store falls back to empty.
+- If the bucket does not exist and the runtime has permission, the service will auto-create it (location controlled by `CREDENTIALS_BUCKET_LOCATION`, default `US`).
 - Local development: if `CREDENTIALS_BUCKET` is unset, the store uses `/tmp/unified-ui-credentials` and will disappear on restart.
 
 Service provider priming
