@@ -26,6 +26,8 @@ Backend (FastAPI)
   - `UI_SESSION_SECRET` – secret key for session middleware.
   - `AGENT_REGISTRY_BASE_URL` – optional override for the agent catalog service (defaults to `https://thunderagents-497847265153.us-central1.run.app`).
   - `DEFAULT_GITHUB_TOKEN` / `GITHUB_TOKEN` – optional GitHub token passed to the frontend as `window.__UNIFIED_UI_CONFIG__.githubToken`.
+  - `CREDENTIALS_BUCKET` – GCS bucket to persist source/target credential stores (required on Cloud Run to survive restarts; local dev falls back to `/tmp/unified-ui-credentials` if unset).
+  - `CREDENTIALS_PREFIX` – optional path prefix inside the bucket for credential objects (default `unified-ui-credentials`).
 - Exposes:
   - `GET /` – serves the built React SPA from `ui/frontend/dist`.
   - `GET /healthz` – reports basic wiring/configuration status.
@@ -62,13 +64,23 @@ User paths & flows
   - “Preview Deployment JSON” to inspect the generated `userrequirements`.
   - “Deploy Selected” submits jobs to TriggerService; status + logs poll automatically.
   - Manual poll button is available per instance if you need a refresh.
-- Credentials: pick active source/target service accounts before running deployments; the UI blocks deploy buttons until both are active.
+- Credentials: pick active source/target service accounts (persisted in the credential bucket) before running deployments; the UI blocks deploy buttons until both are active.
 - Agent catalog: loaded through the backend proxy; if the catalog is unreachable the UI surfaces a snackbar and the deploy board stays empty.
 
 GitHub token handling
 ---------------------
 - Frontend reads `VITE_GITHUB_TOKEN` for branch/env fetches. In Cloud Run, the backend can also inject `window.__UNIFIED_UI_CONFIG__.githubToken` from `DEFAULT_GITHUB_TOKEN`/`GITHUB_TOKEN`.
 - To run locally: create `ui/frontend/.env` with `VITE_GITHUB_TOKEN=<your_pat>` (repo read scope), then `npm run dev`.
+
+Credential persistence (GCS)
+----------------------------
+- Set `CREDENTIALS_BUCKET` (and optionally `CREDENTIALS_PREFIX`) so the credential store is written to GCS and survives Cloud Run restarts/scale-to-zero. Objects written: `<prefix>/source-store.json` and `<prefix>/target-store.json`.
+- Grant the Cloud Run runtime service account access to that bucket (e.g., `roles/storage.objectAdmin` on the bucket). Without access, the store falls back to empty.
+- Local development: if `CREDENTIALS_BUCKET` is unset, the store uses `/tmp/unified-ui-credentials` and will disappear on restart.
+
+Service provider priming
+------------------------
+- You can prime both customer and service provider projects from the Priming screen. Select or paste the provider service account JSON, project ID, and region, then run **Run priming** to create buckets, service accounts, queues, and scheduler jobs for the provider side (mirrors the customer priming flow).
 
 Architecture (runtime)
 ----------------------
@@ -83,7 +95,7 @@ Architecture (runtime)
     |-- /api/web-research   -> [Web Research Agent]
     |-- /api/cheat-sheet    -> [Cheat Sheet service]
     |-- /api/login/userinfo -> [MAIN_API_URL]
-    |-- credentials store   -> [/tmp/unified-ui-credentials] (active source/target SA JSON)
+    |-- credentials store   -> [GCS bucket: CREDENTIALS_BUCKET/CREDENTIALS_PREFIX] (active source/target SA JSON; /tmp fallback for local dev)
 ```
 
 Deployment UX flow
@@ -114,7 +126,7 @@ GCS bucket thunder_agents_catalog
     - read by Unified UI via /api/agent-catalog proxy
 
 Credentials
-    - Stored server-side under /tmp/unified-ui-credentials (source/target SAs)
+    - Stored in GCS bucket (CREDENTIALS_BUCKET with optional CREDENTIALS_PREFIX); local dev falls back to /tmp/unified-ui-credentials
     - Selected active pair gates the Deploy buttons
 
 GitHub tokens

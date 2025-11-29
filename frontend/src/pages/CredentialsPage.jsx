@@ -98,12 +98,12 @@ export default function CredentialsPage() {
         Credentials & Priming
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Manage source/target credentials locally and run priming (buckets, service accounts, queues, scheduler jobs) via TriggerService.
+        Persist source/target credentials in the shared bucket and run priming (buckets, service accounts, queues, scheduler jobs) via TriggerService.
       </Typography>
 
       <Grid container spacing={2} sx={{ mt: 1 }}>
         <Grid item xs={12} md={5}>
-          <SectionCard title="Add credential" subtitle="Stored locally in your browser.">
+          <SectionCard title="Add credential" subtitle="Stored in the shared credential bucket.">
             <Stack spacing={1.5}>
               <TextField label="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} />
               <TextField

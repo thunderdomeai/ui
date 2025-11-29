@@ -16,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from uuid import uuid4
 
+from google.api_core import exceptions as gcs_exceptions
+from google.cloud import storage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified-ui")
@@ -67,6 +69,8 @@ TRIGGERSERVICE_BASE_URL = _normalize_base_url(
     or "https://triggerservice-497847265153.us-central1.run.app"
 )
 DEFAULT_GITHUB_TOKEN = os.getenv("DEFAULT_GITHUB_TOKEN") or os.getenv("GITHUB_TOKEN") or ""
+CREDENTIALS_BUCKET = os.getenv("CREDENTIALS_BUCKET") or ""
+CREDENTIALS_PREFIX = os.getenv("CREDENTIALS_PREFIX", "unified-ui-credentials")
 
 
 HTTPX_TIMEOUT = httpx.Timeout(180.0)
@@ -79,6 +83,7 @@ REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
 VALID_CREDENTIAL_TYPES = {"source", "target"}
 DATA_DIR = Path(os.getenv("CREDENTIALS_DIR", "/tmp/unified-ui-credentials"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+_gcs_bucket = None
 
 
 def _with_forward_headers(
@@ -256,6 +261,12 @@ def _store_file_path(type_name: str) -> Path:
     return DATA_DIR / f"{type_name}-store.json"
 
 
+def _store_blob_name(type_name: str) -> str:
+    prefix = CREDENTIALS_PREFIX.strip("/")
+    blob_name = f"{type_name}-store.json"
+    return f"{prefix}/{blob_name}" if prefix else blob_name
+
+
 def _empty_store() -> Dict[str, Any]:
     return {"selectedId": None, "entries": {}}
 
@@ -266,27 +277,78 @@ def _normalize_type(type_name: str) -> str:
     return type_name
 
 
+def _normalize_store_payload(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return _empty_store()
+    store = _empty_store()
+    store["selectedId"] = raw.get("selectedId")
+    store["entries"] = raw.get("entries", {})
+    if store["selectedId"] and store["selectedId"] not in store["entries"]:
+        store["selectedId"] = None
+    return store
+
+
+def _get_gcs_bucket():
+    global _gcs_bucket
+    if not CREDENTIALS_BUCKET:
+        return None
+    if _gcs_bucket is not None:
+        return _gcs_bucket
+    try:
+        client = storage.Client()
+        _gcs_bucket = client.bucket(CREDENTIALS_BUCKET)
+        if not _gcs_bucket.exists():
+            logger.warning("Credentials bucket %s does not exist or is inaccessible", CREDENTIALS_BUCKET)
+    except Exception as exc:
+        logger.error("Failed to initialize credentials bucket %s: %s", CREDENTIALS_BUCKET, exc)
+        raise HTTPException(status_code=500, detail="Credential bucket is not accessible.")
+    return _gcs_bucket
+
+
 def _load_store(type_name: str) -> Dict[str, Any]:
+    # Prefer GCS if configured; fall back to local disk for local dev.
+    if CREDENTIALS_BUCKET:
+        bucket = _get_gcs_bucket()
+        blob = bucket.blob(_store_blob_name(type_name))
+        try:
+            if not blob.exists():
+                return _empty_store()
+            raw_text = blob.download_as_text(encoding="utf-8")
+            return _normalize_store_payload(json.loads(raw_text))
+        except gcs_exceptions.GoogleAPIError as exc:
+            logger.error("Failed to read %s credential store from GCS: %s", type_name, exc)
+            raise HTTPException(status_code=500, detail="Unable to load credentials from bucket.")
+        except Exception as exc:
+            logger.warning("Unexpected error reading %s store from GCS, falling back to empty: %s", type_name, exc)
+            return _empty_store()
+
     path = _store_file_path(type_name)
     if not path.exists():
         return _empty_store()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return _empty_store()
-        store = _empty_store()
-        store["selectedId"] = raw.get("selectedId")
-        store["entries"] = raw.get("entries", {})
-        if store["selectedId"] and store["selectedId"] not in store["entries"]:
-            store["selectedId"] = None
-        return store
+        return _normalize_store_payload(raw)
     except Exception:
         return _empty_store()
 
 
 def _write_store(type_name: str, store: Dict[str, Any]) -> Dict[str, Any]:
+    serialized = json.dumps(store, indent=2)
+    if CREDENTIALS_BUCKET:
+        bucket = _get_gcs_bucket()
+        blob = bucket.blob(_store_blob_name(type_name))
+        try:
+            blob.upload_from_string(serialized, content_type="application/json")
+            return store
+        except gcs_exceptions.GoogleAPIError as exc:
+            logger.error("Failed to persist %s credential store to GCS: %s", type_name, exc)
+            raise HTTPException(status_code=500, detail="Unable to persist credentials to bucket.")
+        except Exception as exc:
+            logger.error("Unexpected error writing %s store to GCS: %s", type_name, exc)
+            raise HTTPException(status_code=500, detail="Unable to persist credentials to bucket.")
+
     path = _store_file_path(type_name)
-    path.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    path.write_text(serialized, encoding="utf-8")
     return store
 
 
