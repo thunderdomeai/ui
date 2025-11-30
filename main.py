@@ -3,7 +3,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import jwt
 import time
 from datetime import datetime, timezone
@@ -17,7 +17,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from uuid import uuid4
 
 from google.api_core import exceptions as gcs_exceptions
+from google.auth.transport.requests import Request as GoogleRequest
 from google.cloud import storage
+from google.oauth2 import service_account
 from tenant_stack_template import get_tenant_stack_template, list_tenant_stack_templates
 
 logging.basicConfig(level=logging.INFO)
@@ -83,6 +85,7 @@ READ_TIMEOUT_MESSAGE = (
     "check the Deployment Dashboard or job history to confirm."
 )
 REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
+SQLADMIN_SCOPE = "https://www.googleapis.com/auth/sqlservice.admin"
 
 # --- Simple server-side credential store ---
 _gcs_bucket = None
@@ -412,6 +415,32 @@ def _write_store(type_name: str, store: Dict[str, Any]) -> Dict[str, Any]:
     return store
 
 
+def _get_target_sql_token_and_project() -> Tuple[str, str]:
+    """
+    Retrieve the selected target credential's project ID and a short-lived SQL Admin access token.
+    """
+    store = _load_store("target")
+    entries = store.get("entries") or {}
+    selected_id = store.get("selectedId")
+    entry = entries.get(selected_id) if selected_id else None
+    if not entry:
+        raise HTTPException(status_code=400, detail="No selected target credential for SQL discovery.")
+    sa_info = entry.get("credential") or {}
+    project_id = entry.get("projectId") or sa_info.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="Target credential is missing project_id.")
+
+    try:
+        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=[SQLADMIN_SCOPE])
+        creds.refresh(GoogleRequest())
+    except Exception as exc:
+        logger.error("Failed to create/refresh SQL Admin credentials: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to use target credential for SQL discovery.")
+    if not creds.token:
+        raise HTTPException(status_code=500, detail="Failed to generate access token for SQL discovery.")
+    return project_id, creds.token
+
+
 @app.get("/api/credential-store/{type_name}")
 async def credential_store_get(type_name: str) -> JSONResponse:
     t = _normalize_type(type_name)
@@ -571,6 +600,90 @@ async def credential_store_mark_primed(type_name: str, entry_id: str, request: R
     store["entries"][entry_id] = entry
     _write_store(t, store)
     return JSONResponse({"entry": entry})
+
+
+# --- Cloud SQL discovery using the selected target credential ---
+@app.get("/api/sql/instances")
+async def sql_instances() -> JSONResponse:
+    """
+    List Cloud SQL instances for the selected target credential's project.
+    """
+    project_id, access_token = _get_target_sql_token_and_project()
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL Admin instances request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from Cloud SQL Admin.")
+
+    if resp.is_error:
+        raise HTTPException(status_code=resp.status_code, detail=payload)
+
+    items = payload.get("items") or []
+    instances = []
+    for inst in items:
+        name = inst.get("name")
+        region = inst.get("region") or inst.get("gceZone")
+        connection_name = inst.get("connectionName")
+        if name and connection_name:
+            instances.append(
+                {
+                    "name": name,
+                    "region": region,
+                    "connectionName": connection_name,
+                }
+            )
+
+    return JSONResponse({"projectId": project_id, "instances": instances})
+
+
+@app.get("/api/sql/instances/{instance_name}/databases")
+async def sql_instance_databases(instance_name: str) -> JSONResponse:
+    """
+    List databases for a Cloud SQL instance in the selected target project.
+    """
+    project_id, access_token = _get_target_sql_token_and_project()
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance_name}/databases"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL Admin databases request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from Cloud SQL Admin.")
+
+    if resp.is_error:
+        raise HTTPException(status_code=resp.status_code, detail=payload)
+
+    dbs = []
+    for db in payload.get("items") or []:
+        name = db.get("name")
+        charset = db.get("charset")
+        collation = db.get("collation")
+        if name:
+            dbs.append(
+                {
+                    "name": name,
+                    "charset": charset,
+                    "collation": collation,
+                }
+            )
+
+    return JSONResponse({"projectId": project_id, "instance": instance_name, "databases": dbs})
 
 
 # --- Deploy configuration store (simple JSON persisted on disk) ---

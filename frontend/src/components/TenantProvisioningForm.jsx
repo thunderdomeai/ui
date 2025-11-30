@@ -17,7 +17,14 @@ import {
 } from "@mui/material";
 import { RocketLaunch } from "@mui/icons-material";
 
-import { fetchTenantStackTemplate, triggerDeploy, listJobs, getJob } from "../utils/api.js";
+import {
+  fetchTenantStackTemplate,
+  triggerDeploy,
+  listJobs,
+  getJob,
+  listSqlInstances,
+  listSqlDatabases,
+} from "../utils/api.js";
 
 const defaultGithubToken =
   import.meta.env.VITE_GITHUB_TOKEN ||
@@ -127,7 +134,7 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
     clientName: "",
     projectId: "",
     region: "us-central1",
-    dbAlias: "default",
+    dbAlias: "",
     users: "",
   });
   const [deploying, setDeploying] = useState(false);
@@ -140,10 +147,17 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
   const [availableJobs, setAvailableJobs] = useState([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [jobLoadError, setJobLoadError] = useState("");
+  const [sqlInstances, setSqlInstances] = useState([]);
+  const [sqlInstancesLoading, setSqlInstancesLoading] = useState(false);
+  const [sqlInstancesError, setSqlInstancesError] = useState("");
+  const [selectedInstanceName, setSelectedInstanceName] = useState("");
+  const [sqlDatabases, setSqlDatabases] = useState([]);
+  const [sqlDatabasesLoading, setSqlDatabasesLoading] = useState(false);
+  const [sqlDatabasesError, setSqlDatabasesError] = useState("");
+  const [selectedDatabaseName, setSelectedDatabaseName] = useState("");
   const credentialsMissing = !serviceAccount || !customerServiceAccount;
   const providerStatus = providerHealth?.overall_status || null;
   const providerBlocked = providerStatus === "error";
-  const dbAliasOptions = ["thunderdome", "core-db", "default"];
 
   const jobIdentifier = (job) =>
     job?.job_identifier || job?.job_key || job?.job_execution_name || job?.instance_id || job?.id || "";
@@ -171,6 +185,44 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
     }
   };
 
+  const loadSqlInstances = async () => {
+    setSqlInstancesLoading(true);
+    setSqlInstancesError("");
+    try {
+      const data = await listSqlInstances();
+      const instances = Array.isArray(data.instances) ? data.instances : [];
+      setSqlInstances(instances);
+    } catch (error) {
+      console.error("Failed to load SQL instances:", error);
+      setSqlInstancesError(error.message || "Failed to load SQL instances.");
+    } finally {
+      setSqlInstancesLoading(false);
+    }
+  };
+
+  const loadSqlDatabases = async (instanceName) => {
+    if (!instanceName) {
+      setSqlDatabases([]);
+      setSelectedDatabaseName("");
+      return;
+    }
+    setSqlDatabasesLoading(true);
+    setSqlDatabasesError("");
+    try {
+      const data = await listSqlDatabases(instanceName);
+      const dbs = Array.isArray(data.databases) ? data.databases : [];
+      setSqlDatabases(dbs);
+      if (dbs.length === 1) {
+        setSelectedDatabaseName(dbs[0].name);
+      }
+    } catch (error) {
+      console.error("Failed to load SQL databases:", error);
+      setSqlDatabasesError(error.message || "Failed to load SQL databases.");
+    } finally {
+      setSqlDatabasesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (configSource === "existingJob" && availableJobs.length === 0 && !loadingJobs) {
       fetchAvailableJobs().catch((err) => {
@@ -179,6 +231,18 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       });
     }
   }, [configSource, availableJobs.length, loadingJobs]);
+
+  useEffect(() => {
+    if (!sqlInstances.length && !sqlInstancesLoading) {
+      loadSqlInstances().catch((err) => console.error("Error loading SQL instances on mount:", err));
+    }
+  }, [sqlInstances.length, sqlInstancesLoading]);
+
+  useEffect(() => {
+    if (selectedInstanceName) {
+      loadSqlDatabases(selectedInstanceName).catch((err) => console.error("Error loading SQL databases on change:", err));
+    }
+  }, [selectedInstanceName]);
 
   const fetchEnvSourcesForRepo = async (repoUrl, branch) => {
     if (!repoUrl) return { envVars: [], selectedSourceName: null, foundEnv: false, foundExample: false };
@@ -303,6 +367,11 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       setSnackbarOpen(true);
       return;
     }
+    if (!selectedInstanceName || !selectedDatabaseName) {
+      setSnackbarMessage("Select a Cloud SQL instance and database before provisioning.");
+      setSnackbarOpen(true);
+      return;
+    }
 
     setDeploying(true);
     setDeploymentStatus(null);
@@ -311,20 +380,24 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
     try {
       const tenantProjectId = formData.projectId.trim();
       const region = (formData.region || "").trim() || "us-central1";
-      const dbAlias = (formData.dbAlias || "").trim() || "core-db";
       const tenantSlug = formData.clientName
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "") || "tenant";
-      const dbInstance = dbAlias;
-      const dbName = `${tenantSlug}_data`;
+      const selectedInstance = sqlInstances.find((inst) => inst.name === selectedInstanceName) || null;
+      const connectionName = selectedInstance?.connectionName || "";
+      if (!connectionName) {
+        throw new Error("Selected Cloud SQL instance is missing a connection name.");
+      }
+      const dbName = selectedDatabaseName;
+      const dbAliasLabel = (formData.dbAlias || "").trim() || dbName;
 
       const tenantConfig = {
         client_name: formData.clientName,
         project_id: tenantProjectId,
         region,
-        db_alias: dbAlias,
+        db_alias: dbAliasLabel,
         users: formData.users,
       };
 
@@ -368,7 +441,7 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         tenantProjectId,
         tenantSlug,
         region,
-        dbInstance,
+        dbInstance: connectionName,
         dbName,
       });
 
@@ -537,19 +610,60 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         </Grid>
         <Grid item xs={12} sm={6}>
           <Autocomplete
-            freeSolo
-            options={dbAliasOptions}
-            value={formData.dbAlias}
-            onChange={(_, newValue) => setFormData((prev) => ({ ...prev, dbAlias: newValue || "" }))}
-            onInputChange={(_, newInputValue) => setFormData((prev) => ({ ...prev, dbAlias: newInputValue || "" }))}
+            options={sqlInstances}
+            getOptionLabel={(inst) =>
+              inst && inst.name ? `${inst.name}${inst.region ? ` (${inst.region})` : ""}` : ""
+            }
+            loading={sqlInstancesLoading}
+            value={sqlInstances.find((inst) => inst.name === selectedInstanceName) || null}
+            onOpen={() => {
+              if (!sqlInstances.length && !sqlInstancesLoading) {
+                loadSqlInstances().catch((err) => console.error("Error loading SQL instances on open:", err));
+              }
+            }}
+            onChange={(_, newValue) => {
+              const name = newValue?.name || "";
+              setSelectedInstanceName(name);
+              setSelectedDatabaseName("");
+              loadSqlDatabases(name).catch((err) => console.error("Error loading SQL databases from instance change:", err));
+            }}
             renderInput={(params) => (
               <TextField
                 {...params}
                 fullWidth
-                label="Database Instance Alias"
-                helperText="Select or type the Cloud SQL instance name (e.g., thunderdome)"
+                label="Cloud SQL Instance"
+                helperText={sqlInstancesError || "Select an existing Cloud SQL instance in the target project."}
               />
             )}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <Autocomplete
+            options={sqlDatabases}
+            getOptionLabel={(db) => db?.name || ""}
+            loading={sqlDatabasesLoading}
+            value={sqlDatabases.find((db) => db.name === selectedDatabaseName) || null}
+            onChange={(_, newValue) => {
+              setSelectedDatabaseName(newValue?.name || "");
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                fullWidth
+                label="Database"
+                helperText={sqlDatabasesError || "Select an existing database in the chosen instance."}
+              />
+            )}
+          />
+        </Grid>
+        <Grid item xs={12} sm={6}>
+          <TextField
+            fullWidth
+            label="Database Alias (optional)"
+            name="dbAlias"
+            value={formData.dbAlias}
+            onChange={handleChange}
+            helperText="Optional label for your own tracking (not used for connection)."
           />
         </Grid>
         <Grid item xs={12}>

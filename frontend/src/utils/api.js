@@ -172,3 +172,11 @@ export async function fetchAgentCatalog() {
 export async function fetchProviderHealth() {
   return fetchJson("/api/provider/health");
 }
+
+export async function listSqlInstances() {
+  return fetchJson("/api/sql/instances");
+}
+
+export async function listSqlDatabases(instanceName) {
+  return fetchJson(`/api/sql/instances/${encodeURIComponent(instanceName)}/databases`);
+}
