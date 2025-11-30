@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -31,14 +31,44 @@ export default function CredentialsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    // Autofill project ID from the selected credential when available
+    if (store.activeEntry?.credential?.project_id && !projectId) {
+      setProjectId(store.activeEntry.credential.project_id);
+    }
+  }, [store.activeEntry, projectId]);
+
   const addCredential = async () => {
     try {
       const parsed = JSON.parse(jsonText);
       await store.addEntry({ label, credential: parsed });
       setLabel("");
       setJsonText("");
+      if (parsed.project_id) {
+        setProjectId(parsed.project_id);
+      }
     } catch (e) {
       setError(e.message || "Invalid JSON");
+    }
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      setJsonText(text);
+      if (!label) {
+        const baseName = file.name.replace(/\.[^.]+$/, "");
+        setLabel(baseName);
+      }
+      if (parsed.project_id) {
+        setProjectId(parsed.project_id);
+      }
+      setError("");
+    } catch (e) {
+      setError(e.message || "Invalid JSON file");
     }
   };
 
@@ -105,6 +135,10 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={5}>
           <SectionCard title="Add credential" subtitle="Stored in the shared credential bucket.">
             <Stack spacing={1.5}>
+              <Button variant="outlined" component="label">
+                Upload JSON file
+                <input type="file" accept="application/json,.json" hidden onChange={handleFileUpload} />
+              </Button>
               <TextField label="Label (optional)" value={label} onChange={(e) => setLabel(e.target.value)} />
               <TextField
                 label="Credential JSON"
