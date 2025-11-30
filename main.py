@@ -77,9 +77,10 @@ CREDENTIALS_PREFIX = os.getenv("CREDENTIALS_PREFIX", "unified-ui-credentials")
 CREDENTIALS_BUCKET_LOCATION = os.getenv("CREDENTIALS_BUCKET_LOCATION") or "US"
 
 
-HTTPX_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
+HTTPX_TIMEOUT = httpx.Timeout(600.0, connect=15.0)
 READ_TIMEOUT_MESSAGE = (
-    "Connecting to the service took too long. Please try again in a couple of minutes."
+    "Connecting to the service took too long. The deployment request may still be running; "
+    "check the Deployment Dashboard or job history to confirm."
 )
 REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
 

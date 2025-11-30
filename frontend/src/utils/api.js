@@ -13,7 +13,10 @@ async function fetchJson(path, options = {}) {
     } catch (_) {
       /* ignore */
     }
-    throw new Error(detail || `Request failed (${res.status})`);
+    const error = new Error(detail || `Request failed (${res.status})`);
+    error.status = res.status;
+    error.detail = detail;
+    throw error;
   }
   const text = await res.text();
   if (!text) return {};

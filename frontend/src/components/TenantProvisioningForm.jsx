@@ -405,8 +405,21 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       }
     } catch (error) {
       console.error("Error triggering tenant stack deployment:", error);
-      setDeploymentStatus("error");
-      setDeploymentLog(`Error: ${error.message}`);
+      const message = error?.message || "Unknown error";
+      const isTimeout =
+        error?.status === 504 ||
+        message.toLowerCase().includes("timeout") ||
+        message.toLowerCase().includes("too long");
+      if (isTimeout) {
+        setDeploymentStatus("warning");
+        setDeploymentLog(
+          `Deployment submission timed out, but jobs may still have been accepted. ` +
+          `Check the Deployment Dashboard or job history for updates.\n\nDetails: ${message}`,
+        );
+      } else {
+        setDeploymentStatus("error");
+        setDeploymentLog(`Error: ${message}`);
+      }
     } finally {
       setDeploying(false);
     }
@@ -577,9 +590,21 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
 
       {deploymentLog && (
         <Box sx={{ mt: 3 }}>
-          <Alert severity={deploymentStatus === "error" ? "error" : "success"}>
+          <Alert
+            severity={
+              deploymentStatus === "error"
+                ? "error"
+                : deploymentStatus === "warning"
+                  ? "warning"
+                  : "success"
+            }
+          >
             <Typography variant="subtitle2" fontWeight="bold">
-              {deploymentStatus === "error" ? "Deployment Failed" : "Deployment Initiated"}
+              {deploymentStatus === "error"
+                ? "Deployment Failed"
+                : deploymentStatus === "warning"
+                  ? "Deployment Submitted (timeout waiting for response)"
+                  : "Deployment Initiated"}
             </Typography>
             <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: "0.85rem", marginTop: "8px" }}>
               {deploymentLog}

@@ -1448,6 +1448,11 @@ export default function ThunderdeployPage() {
 
     try {
       const userrequirements = JSON.parse(finalJsonStr);
+      console.log("Triggering deploy with payload:", {
+        userrequirements,
+        serviceaccount: globalServiceAccountFile,
+        customer_serviceaccount: globalCustomerServiceAccountFile,
+      });
       const responseData = await triggerDeploy({
         userrequirements,
         serviceaccount: globalServiceAccountFile,
@@ -1481,12 +1486,33 @@ export default function ThunderdeployPage() {
 
     } catch (error) {
       console.error("Error triggering deployment:", error);
-      setDeploymentMessage(`Error triggering deployment: ${error.message}`);
-      setDeploymentInstances(prev => prev.map(inst =>
-        idsToDeploy.includes(inst.id)
-          ? { ...inst, deploymentStatus: 'error_trigger_failed', deploymentError: error.message }
-          : inst
-      ));
+      const message = error?.message || "Unknown error";
+      const isTimeout =
+        error?.status === 504 ||
+        message.toLowerCase().includes("timeout") ||
+        message.toLowerCase().includes("too long");
+      if (isTimeout) {
+        setDeploymentMessage(
+          "Deployment submission timed out, but jobs may still have been accepted. Check the Deployment Dashboard for status."
+        );
+        setDeploymentInstances(prev => prev.map(inst =>
+          idsToDeploy.includes(inst.id)
+            ? {
+                ...inst,
+                deploymentStatus: 'submitted_pending_status',
+                deploymentError: null,
+                deploymentLog: "Submission timed out; monitoring may still show progress once jobs start.",
+              }
+            : inst
+        ));
+      } else {
+        setDeploymentMessage(`Error triggering deployment: ${message}`);
+        setDeploymentInstances(prev => prev.map(inst =>
+          idsToDeploy.includes(inst.id)
+            ? { ...inst, deploymentStatus: 'error_trigger_failed', deploymentError: message }
+            : inst
+        ));
+      }
     } finally {
       setDeploying(false);
       setSnackbarOpen(true);
