@@ -35,6 +35,7 @@ if (FRONTEND_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 else:
     logger.warning("Frontend assets directory not found at %s", FRONTEND_DIST / "assets")
+logger.info("Frontend dist path: %s (exists=%s)", FRONTEND_DIST, FRONTEND_DIST.exists())
 
 
 # --- Session / auth bootstrap (kept minimal for now) ---
