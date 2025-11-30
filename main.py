@@ -77,7 +77,7 @@ CREDENTIALS_PREFIX = os.getenv("CREDENTIALS_PREFIX", "unified-ui-credentials")
 CREDENTIALS_BUCKET_LOCATION = os.getenv("CREDENTIALS_BUCKET_LOCATION") or "US"
 
 
-HTTPX_TIMEOUT = httpx.Timeout(180.0)
+HTTPX_TIMEOUT = httpx.Timeout(300.0, connect=15.0)
 READ_TIMEOUT_MESSAGE = (
     "Connecting to the service took too long. Please try again in a couple of minutes."
 )
