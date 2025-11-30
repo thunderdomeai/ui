@@ -177,6 +177,9 @@ async def _proxy_trigger_request(
     target_base = TRIGGERSERVICE_BASE_URL.rstrip("/")
     url = f"{target_base}{endpoint}"
     headers = _with_forward_headers(request)
+    # Let httpx set the appropriate multipart boundary when sending files.
+    if files is not None:
+        headers.pop("Content-Type", None)
 
     try:
         async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
@@ -1416,11 +1419,13 @@ async def trigger_deploy(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        logger.error("Invalid JSON payload in trigger_deploy")
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     required = ("userrequirements", "serviceaccount", "customer_serviceaccount")
     missing = [key for key in required if key not in body]
     if missing:
+        logger.error(f"Missing fields in trigger_deploy: {missing}. Keys found: {list(body.keys())}")
         raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
 
     files = {
