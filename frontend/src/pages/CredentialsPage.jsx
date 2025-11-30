@@ -18,6 +18,7 @@ import {
   InputLabel,
   Select,
   MenuItem,
+  Chip,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CheckIcon from "@mui/icons-material/Check";
@@ -41,6 +42,9 @@ export default function CredentialsPage() {
   const [statusMsg, setStatusMsg] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const activeSourceLabel = useMemo(() => sourceStore.activeEntry?.label || "None", [sourceStore.activeEntry]);
+  const activeTargetLabel = useMemo(() => targetStore.activeEntry?.label || "None", [targetStore.activeEntry]);
 
   useEffect(() => {
     if (targetStore.activeEntry?.credential?.project_id) {
@@ -134,6 +138,14 @@ export default function CredentialsPage() {
       <Typography variant="body1" color="text.secondary" gutterBottom>
         Persist source/target credentials in the shared bucket and run priming (buckets, service accounts, queues, scheduler jobs) via TriggerService.
       </Typography>
+      <Alert severity="info" sx={{ mb: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
+          <span>Active source:</span>
+          <Chip label={activeSourceLabel} color={sourceStore.activeEntry ? "success" : "default"} size="small" />
+          <span>Active target:</span>
+          <Chip label={activeTargetLabel} color={targetStore.activeEntry ? "success" : "default"} size="small" />
+        </Stack>
+      </Alert>
 
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
         <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
@@ -176,16 +188,21 @@ export default function CredentialsPage() {
                 <ListItem
                   key={entry.id}
                   secondaryAction={
-                    <IconButton edge="end" aria-label="delete" onClick={() => store.removeEntry(entry.id)}>
-                      <DeleteIcon />
-                    </IconButton>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      {store.selectedId === entry.id ? (
+                        <Chip size="small" color="success" label="Active" />
+                      ) : (
+                        <Button size="small" variant="outlined" onClick={() => store.selectEntry(entry.id)}>
+                          Activate
+                        </Button>
+                      )}
+                      <IconButton edge="end" aria-label="delete" onClick={() => store.removeEntry(entry.id)}>
+                        <DeleteIcon />
+                      </IconButton>
+                    </Stack>
                   }
-                  button
-                  selected={store.selectedId === entry.id}
-                  onClick={() => store.selectEntry(entry.id)}
                 >
                   <ListItemText primary={entry.label} secondary={entry.id} />
-                  {store.selectedId === entry.id ? <CheckIcon color="success" /> : null}
                 </ListItem>
               ))}
               {store.entries.length === 0 ? (
