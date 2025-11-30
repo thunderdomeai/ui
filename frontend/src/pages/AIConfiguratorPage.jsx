@@ -6,6 +6,7 @@ import {
   Chip,
   Divider,
   Grid,
+  MenuItem,
   Stack,
   TextField,
   ToggleButton,
@@ -16,6 +17,7 @@ import SaveIcon from "@mui/icons-material/Save";
 import BoltIcon from "@mui/icons-material/Bolt";
 import DownloadIcon from "@mui/icons-material/Download";
 import SectionCard from "../components/SectionCard.jsx";
+import { useCredentialStoreBridge } from "../hooks/credentials/useCredentialStores.js";
 
 const emptyDatabase = {
   name: "primary",
@@ -72,6 +74,36 @@ export default function AIConfiguratorPage() {
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [saving, setSaving] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
+
+  const credentialBridge = useCredentialStoreBridge();
+  const projectOptions = useMemo(() => {
+    const candidates = [
+      ...credentialBridge.source.entries.map((e) => ({ ...e, type: "source" })),
+      ...credentialBridge.target.entries.map((e) => ({ ...e, type: "target" })),
+    ];
+    const filtered = candidates.filter(
+      (entry) =>
+        entry.projectId &&
+        (entry.status === "primed" || entry.status === "verified")
+    );
+    const seen = new Set();
+    return filtered
+      .filter((entry) => {
+        if (seen.has(entry.projectId)) return false;
+        seen.add(entry.projectId);
+        return true;
+      })
+      .map((entry) => ({
+        projectId: entry.projectId,
+        label: `${entry.projectId} (${entry.type}, ${entry.status})`,
+      }));
+  }, [credentialBridge.source.entries, credentialBridge.target.entries]);
+
+  useEffect(() => {
+    if (!cloud.projectId && projectOptions.length > 0) {
+      setCloud((prev) => ({ ...prev, projectId: projectOptions[0].projectId }));
+    }
+  }, [projectOptions, cloud.projectId]);
 
   const configuratorBase = window.__UNIFIED_UI_CONFIG__?.AGENTONE_CONFIGURATOR_URL || "";
 
@@ -659,12 +691,30 @@ export default function AIConfiguratorPage() {
           >
             <Stack spacing={2}>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                <TextField
-                  label="Project ID"
-                  value={cloud.projectId}
-                  onChange={handleCloudChange("projectId")}
-                  fullWidth
-                />
+                {projectOptions.length > 0 ? (
+                  <TextField
+                    select
+                    label="Project ID"
+                    value={cloud.projectId}
+                    onChange={handleCloudChange("projectId")}
+                    fullWidth
+                    helperText="Only verified/primed credentials are shown."
+                  >
+                    {projectOptions.map((opt) => (
+                      <MenuItem key={opt.projectId} value={opt.projectId}>
+                        {opt.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                ) : (
+                  <TextField
+                    label="Project ID"
+                    value={cloud.projectId}
+                    onChange={handleCloudChange("projectId")}
+                    fullWidth
+                    helperText="Enter a project ID (no verified/primed credentials detected)."
+                  />
+                )}
                 <TextField label="Region" value={cloud.region} onChange={handleCloudChange("region")} fullWidth />
               </Stack>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -731,6 +781,11 @@ export default function AIConfiguratorPage() {
               >
                 {provisioning ? "Provisioning..." : "Provision to cloud + register MCP"}
               </Button>
+              <Typography variant="body2" color="text.secondary">
+                This calls the Agent One configurator to deploy broker + MCP into the selected project/region,
+                then registers the MCP in the registry and updates the config with the new URLs. Ensure the
+                configurator service account has deploy rights in that project.
+              </Typography>
             </Stack>
           </SectionCard>
         </Grid>
