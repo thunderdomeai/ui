@@ -143,6 +143,7 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
   const credentialsMissing = !serviceAccount || !customerServiceAccount;
   const providerStatus = providerHealth?.overall_status || null;
   const providerBlocked = providerStatus === "error";
+  const dbAliasOptions = ["thunderdome", "core-db", "default"];
 
   const jobIdentifier = (job) =>
     job?.job_identifier || job?.job_key || job?.job_execution_name || job?.instance_id || job?.id || "";
@@ -522,13 +523,20 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
           />
         </Grid>
         <Grid item xs={12} sm={6}>
-          <TextField
-            fullWidth
-            label="Database Alias"
-            name="dbAlias"
+          <Autocomplete
+            freeSolo
+            options={dbAliasOptions}
             value={formData.dbAlias}
-            onChange={handleChange}
-            helperText="Alias for the MCP database (default: default)"
+            onChange={(_, newValue) => setFormData((prev) => ({ ...prev, dbAlias: newValue || "" }))}
+            onInputChange={(_, newInputValue) => setFormData((prev) => ({ ...prev, dbAlias: newInputValue || "" }))}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                fullWidth
+                label="Database Instance Alias"
+                helperText="Select or type the Cloud SQL instance name (e.g., thunderdome)"
+              />
+            )}
           />
         </Grid>
         <Grid item xs={12}>
