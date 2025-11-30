@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -12,6 +12,12 @@ import {
   Stack,
   TextField,
   Typography,
+  Tabs,
+  Tab,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CheckIcon from "@mui/icons-material/Check";
@@ -21,7 +27,12 @@ import { primeCustomer, getPrimeStatus } from "../utils/api.js";
 import PrimeResultsTable from "../components/PrimeResultsTable.jsx";
 
 export default function CredentialsPage() {
-  const store = useServerCredentialStore("target");
+  const [tab, setTab] = useState("target");
+  const sourceStore = useServerCredentialStore("source");
+  const targetStore = useServerCredentialStore("target");
+
+  const store = tab === "source" ? sourceStore : targetStore;
+
   const [label, setLabel] = useState("");
   const [jsonText, setJsonText] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -32,11 +43,10 @@ export default function CredentialsPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Autofill project ID from the selected credential when available
-    if (store.activeEntry?.credential?.project_id && !projectId) {
-      setProjectId(store.activeEntry.credential.project_id);
+    if (targetStore.activeEntry?.credential?.project_id) {
+      setProjectId(targetStore.activeEntry.credential.project_id);
     }
-  }, [store.activeEntry, projectId]);
+  }, [targetStore.activeEntry]);
 
   const addCredential = async () => {
     try {
@@ -44,9 +54,6 @@ export default function CredentialsPage() {
       await store.addEntry({ label, credential: parsed });
       setLabel("");
       setJsonText("");
-      if (parsed.project_id) {
-        setProjectId(parsed.project_id);
-      }
     } catch (e) {
       setError(e.message || "Invalid JSON");
     }
@@ -63,9 +70,6 @@ export default function CredentialsPage() {
         const baseName = file.name.replace(/\.[^.]+$/, "");
         setLabel(baseName);
       }
-      if (parsed.project_id) {
-        setProjectId(parsed.project_id);
-      }
       setError("");
     } catch (e) {
       setError(e.message || "Invalid JSON file");
@@ -73,8 +77,8 @@ export default function CredentialsPage() {
   };
 
   const handlePrime = async () => {
-    if (!store.activeEntry?.credential) {
-      setError("Select an active credential first.");
+    if (!targetStore.activeEntry?.credential) {
+      setError("Select an active target credential first.");
       return;
     }
     setLoading(true);
@@ -82,8 +86,8 @@ export default function CredentialsPage() {
     setStatusMsg("");
     try {
       const payload = {
-        service_account: store.activeEntry.credential,
-        project_id: projectId || store.activeEntry.credential.project_id,
+        service_account: targetStore.activeEntry.credential,
+        project_id: projectId || targetStore.activeEntry.credential.project_id,
         region,
         include_defaults: true,
         extra_buckets: [],
@@ -99,18 +103,18 @@ export default function CredentialsPage() {
   };
 
   const handleCheck = async () => {
-    if (!store.activeEntry?.credential) {
-      setError("Select an active credential first.");
+    if (!targetStore.activeEntry?.credential) {
+      setError("Select an active target credential first.");
       return;
     }
     setLoading(true);
     setError("");
     setStatusMsg("");
     try {
-      const credentialB64 = btoa(JSON.stringify(store.activeEntry.credential));
+      const credentialB64 = btoa(JSON.stringify(targetStore.activeEntry.credential));
       const data = await getPrimeStatus({
         credentialB64,
-        projectId: projectId || store.activeEntry.credential.project_id,
+        projectId: projectId || targetStore.activeEntry.credential.project_id,
         region,
       });
       setPrimeResult(data);
@@ -131,9 +135,19 @@ export default function CredentialsPage() {
         Persist source/target credentials in the shared bucket and run priming (buckets, service accounts, queues, scheduler jobs) via TriggerService.
       </Typography>
 
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+        <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
+          <Tab label="Target Credentials (Customer)" value="target" />
+          <Tab label="Source Credentials (Deployer)" value="source" />
+        </Tabs>
+      </Box>
+
       <Grid container spacing={2} sx={{ mt: 1 }}>
         <Grid item xs={12} md={5}>
-          <SectionCard title="Add credential" subtitle="Stored in the shared credential bucket.">
+          <SectionCard
+            title={`Add ${tab} credential`}
+            subtitle={`Stored in the shared credential bucket for ${tab}.`}
+          >
             <Stack spacing={1.5}>
               <Button variant="outlined" component="label">
                 Upload JSON file
@@ -148,12 +162,15 @@ export default function CredentialsPage() {
                 minRows={4}
               />
               <Button variant="contained" onClick={addCredential}>
-                Save credential
+                Save {tab} credential
               </Button>
               {error ? <Alert severity="error">{error}</Alert> : null}
             </Stack>
           </SectionCard>
-          <SectionCard title="Stored credentials" subtitle="Select active target for priming.">
+          <SectionCard
+            title={`Stored ${tab} credentials`}
+            subtitle={`Select active ${tab} for priming/deploying.`}
+          >
             <List dense>
               {store.entries.map((entry) => (
                 <ListItem
@@ -182,7 +199,31 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={7}>
           <SectionCard title="Prime project" subtitle="Creates buckets, service accounts, task queues, scheduler jobs.">
             <Stack spacing={1.5}>
-              <TextField label="Project ID" value={projectId} onChange={(e) => setProjectId(e.target.value)} />
+              <FormControl fullWidth>
+                <InputLabel id="project-select-label">Project ID</InputLabel>
+                <Select
+                  labelId="project-select-label"
+                  value={projectId || targetStore.activeEntry?.credential?.project_id || ""}
+                  label="Project ID"
+                  onChange={(e) => setProjectId(e.target.value)}
+                  disabled={!targetStore.entries.length}
+                >
+                  {targetStore.entries
+                    .map((entry) => entry?.credential?.project_id)
+                    .filter(Boolean)
+                    .filter((value, index, arr) => arr.indexOf(value) === index)
+                    .map((pid) => (
+                      <MenuItem key={pid} value={pid}>
+                        {pid}
+                      </MenuItem>
+                    ))}
+                  {!targetStore.entries.length ? (
+                    <MenuItem value="">
+                      <em>Add a target credential to auto-fill project</em>
+                    </MenuItem>
+                  ) : null}
+                </Select>
+              </FormControl>
               <TextField label="Region" value={region} onChange={(e) => setRegion(e.target.value)} />
               <Stack direction="row" spacing={1}>
                 <Button variant="contained" onClick={handlePrime} disabled={loading}>
