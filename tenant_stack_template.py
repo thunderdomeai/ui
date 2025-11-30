@@ -55,6 +55,7 @@ def _resolve_template_path() -> Path:
         override_path = Path(override).expanduser()
         return override_path if override_path.is_absolute() else (BASE_DIR / override_path).resolve()
     candidates = [
+        BASE_DIR / "ui" / "thunderdeploy" / "config" / "thunderdeployone_userrequirements_final.json",
         BASE_DIR / "thunderdeploy" / "config" / "thunderdeployone_userrequirements_final.json",
         BASE_DIR.parent / "thunderdeploy" / "config" / "thunderdeployone_userrequirements_final.json",
     ]
