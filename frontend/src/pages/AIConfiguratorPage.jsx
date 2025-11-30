@@ -50,17 +50,28 @@ const defaultConfig = {
   databases: [emptyDatabase],
 };
 
+const defaultCloud = {
+  projectId: "",
+  region: "us-central1",
+  dbAlias: "",
+  mcpServiceName: "",
+  brokerServiceName: "sapb1-broker",
+  mcpDbType: "SQL Server",
+};
+
 export default function AIConfiguratorPage() {
   const [config, setConfig] = useState(defaultConfig);
   const [secrets, setSecrets] = useState({});
   const [configKey, setConfigKey] = useState("");
   const [configs, setConfigs] = useState([]);
   const [currentRecord, setCurrentRecord] = useState(null);
+  const [cloud, setCloud] = useState(defaultCloud);
   const [status, setStatus] = useState(null);
   const [error, setError] = useState(null);
   const [loadingList, setLoadingList] = useState(false);
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
 
   const configuratorBase = window.__UNIFIED_UI_CONFIG__?.AGENTONE_CONFIGURATOR_URL || "";
 
@@ -69,6 +80,7 @@ export default function AIConfiguratorPage() {
     setSecrets({});
     setConfigKey("");
     setCurrentRecord(null);
+    setCloud(defaultCloud);
   };
 
   const loadConfigs = useCallback(async () => {
@@ -97,6 +109,7 @@ export default function AIConfiguratorPage() {
     const broker = cfg.broker || {};
     const dbs = Array.isArray(cfg.databases) && cfg.databases.length ? cfg.databases : [emptyDatabase];
     const dbTypeGuess = dbs[0]?.type || dbs[0]?.db_type || defaultConfig.dbType;
+    const cloudCfg = record?.cloud || {};
     setConfig((prev) => ({
       ...prev,
       apiKey: key || record?.apiKey || "",
@@ -126,6 +139,19 @@ export default function AIConfiguratorPage() {
     setConfigKey(key || record?.apiKey || "");
     setCurrentRecord(record);
     setSecrets(record?.secrets || {});
+    setCloud({
+      projectId: cloudCfg.gcp_project_id || "",
+      region: cloudCfg.region || defaultCloud.region,
+      dbAlias:
+        cloudCfg.db_alias ||
+        dbs[0]?.name ||
+        cfg.serviceName ||
+        record?.serviceName ||
+        defaultCloud.dbAlias,
+      mcpServiceName: cloudCfg.mcp_service_name || "",
+      brokerServiceName: cloudCfg.broker_service_name || defaultCloud.brokerServiceName,
+      mcpDbType: cloudCfg.mcp_db_type || defaultCloud.mcpDbType,
+    });
   }, []);
 
   const loadConfig = useCallback(
@@ -205,6 +231,10 @@ export default function AIConfiguratorPage() {
       updated[idx] = { ...updated[idx], [field]: value };
       return { ...prev, databases: updated };
     });
+  };
+
+  const handleCloudChange = (field) => (event) => {
+    setCloud((prev) => ({ ...prev, [field]: event.target.value }));
   };
 
   const removeDb = (idx) => {
@@ -296,6 +326,45 @@ export default function AIConfiguratorPage() {
     document.body.appendChild(a);
     a.click();
     a.remove();
+  };
+
+  const handleProvision = async () => {
+    if (!configKey) {
+      setError("Save or load a configuration first to get its API key.");
+      return;
+    }
+    if (!cloud.projectId || !cloud.dbAlias) {
+      setError("Project ID and DB alias are required to provision.");
+      return;
+    }
+    setProvisioning(true);
+    setError(null);
+    setStatus(null);
+    try {
+      const payload = {
+        gcp_project_id: cloud.projectId,
+        region: cloud.region || "us-central1",
+        db_alias: cloud.dbAlias,
+        mcp_db_type: cloud.mcpDbType || "SQL Server",
+        broker_service_name: cloud.brokerServiceName || "sapb1-broker",
+        mcp_service_name: cloud.mcpServiceName || null,
+      };
+      const res = await fetch(`/api/agentone/config/${configKey}/provision-cloud-mcp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body.detail || "Provisioning failed");
+      }
+      setStatus("Provisioning triggered. Refreshing status...");
+      await loadConfig(configKey);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setProvisioning(false);
+    }
   };
 
   return (
@@ -581,6 +650,87 @@ export default function AIConfiguratorPage() {
                 Download desktop config
               </Button>
               <Button variant="outlined">Test DB connectivity</Button>
+            </Stack>
+          </SectionCard>
+          <SectionCard
+            title="Cloud provisioning"
+            subtitle="Deploy broker/MCP and register in MCP registry."
+            sx={{ mt: 2 }}
+          >
+            <Stack spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Project ID"
+                  value={cloud.projectId}
+                  onChange={handleCloudChange("projectId")}
+                  fullWidth
+                />
+                <TextField label="Region" value={cloud.region} onChange={handleCloudChange("region")} fullWidth />
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="DB alias (required)"
+                  value={cloud.dbAlias}
+                  onChange={handleCloudChange("dbAlias")}
+                  fullWidth
+                />
+                <TextField
+                  label="MCP DB type"
+                  value={cloud.mcpDbType}
+                  onChange={handleCloudChange("mcpDbType")}
+                  fullWidth
+                />
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Broker service name"
+                  value={cloud.brokerServiceName}
+                  onChange={handleCloudChange("brokerServiceName")}
+                  fullWidth
+                />
+                <TextField
+                  label="MCP service name (optional)"
+                  value={cloud.mcpServiceName}
+                  onChange={handleCloudChange("mcpServiceName")}
+                  fullWidth
+                />
+              </Stack>
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                <Chip
+                  label={`Status: ${currentRecord?.cloud?.provisioning_status || "never_run"}`}
+                  color={
+                    currentRecord?.cloud?.provisioning_status === "succeeded"
+                      ? "success"
+                      : currentRecord?.cloud?.provisioning_status === "failed"
+                      ? "error"
+                      : "default"
+                  }
+                  size="small"
+                />
+                {currentRecord?.cloud?.last_provisioned_at ? (
+                  <Chip
+                    label={`Last: ${currentRecord.cloud.last_provisioned_at}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                ) : null}
+                {currentRecord?.cloud?.broker_url ? (
+                  <Chip label="Broker URL set" size="small" variant="outlined" />
+                ) : null}
+                {currentRecord?.cloud?.mcp_url ? (
+                  <Chip label="MCP URL set" size="small" variant="outlined" />
+                ) : null}
+              </Stack>
+              {currentRecord?.cloud?.latest_error ? (
+                <Alert severity="error">{currentRecord.cloud.latest_error}</Alert>
+              ) : null}
+              <Button
+                variant="contained"
+                onClick={handleProvision}
+                disabled={provisioning || !configKey}
+              >
+                {provisioning ? "Provisioning..." : "Provision to cloud + register MCP"}
+              </Button>
             </Stack>
           </SectionCard>
         </Grid>

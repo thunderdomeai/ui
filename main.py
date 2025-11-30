@@ -1645,6 +1645,24 @@ async def agentone_config_delete(api_key: str, request: Request) -> JSONResponse
     )
 
 
+@app.post("/api/agentone/config/{api_key}/provision-cloud-mcp")
+async def agentone_config_provision(api_key: str, request: Request) -> JSONResponse:
+    body = None
+    try:
+        if request.headers.get("content-length"):
+            body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    return await _proxy_request(
+        request,
+        method="POST",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint=f"/config/{api_key}/provision-cloud-mcp",
+        json_body=body,
+    )
+
+
 @app.get("/api/github/content")
 async def github_content(repo: str, path: str, ref: str = "main") -> JSONResponse:
     """
