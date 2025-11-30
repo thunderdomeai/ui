@@ -316,7 +316,7 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "") || "tenant";
-      const dbInstance = `${tenantProjectId}:${region}:${dbAlias}`;
+      const dbInstance = dbAlias;
       const dbName = `${tenantSlug}_data`;
 
       const tenantConfig = {
