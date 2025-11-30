@@ -180,3 +180,10 @@ export async function listSqlInstances() {
 export async function listSqlDatabases(instanceName) {
   return fetchJson(`/api/sql/instances/${encodeURIComponent(instanceName)}/databases`);
 }
+
+export async function bootstrapProvider(body = {}) {
+  return fetchJson("/api/bootstrap/provider", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}

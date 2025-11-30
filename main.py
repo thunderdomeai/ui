@@ -86,6 +86,7 @@ READ_TIMEOUT_MESSAGE = (
 )
 REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
 SQLADMIN_SCOPE = "https://www.googleapis.com/auth/sqlservice.admin"
+CLOUD_BUILD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 # --- Simple server-side credential store ---
 _gcs_bucket = None
@@ -441,6 +442,32 @@ def _get_target_sql_token_and_project() -> Tuple[str, str]:
     return project_id, creds.token
 
 
+def _get_source_build_token_and_project() -> Tuple[str, str, Optional[str]]:
+    """
+    Retrieve the selected source credential's project ID, a Cloud Build access token, and service account email.
+    """
+    store = _load_store("source")
+    entries = store.get("entries") or {}
+    selected_id = store.get("selectedId")
+    entry = entries.get(selected_id) if selected_id else None
+    if not entry:
+        raise HTTPException(status_code=400, detail="No selected source credential for provider bootstrap.")
+    sa_info = entry.get("credential") or {}
+    project_id = entry.get("projectId") or sa_info.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="Source credential is missing project_id.")
+
+    try:
+        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=[CLOUD_BUILD_SCOPE])
+        creds.refresh(GoogleRequest())
+    except Exception as exc:
+        logger.error("Failed to create/refresh Cloud Build credentials: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to use source credential for provider bootstrap.")
+    if not creds.token:
+        raise HTTPException(status_code=500, detail="Failed to generate access token for provider bootstrap.")
+    return project_id, creds.token, sa_info.get("client_email")
+
+
 @app.get("/api/credential-store/{type_name}")
 async def credential_store_get(type_name: str) -> JSONResponse:
     t = _normalize_type(type_name)
@@ -684,6 +711,81 @@ async def sql_instance_databases(instance_name: str) -> JSONResponse:
             )
 
     return JSONResponse({"projectId": project_id, "instance": instance_name, "databases": dbs})
+
+
+# --- Provider bootstrap via Cloud Build using the selected source credential ---
+@app.post("/api/bootstrap/provider")
+async def bootstrap_provider(request: Request) -> JSONResponse:
+    """
+    Kick off a provider bootstrap Cloud Build using the selected source credential.
+    This runs `make bootstrap-provider` from the thunderdeploy repo (GitHub), using the provided region.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    region = (body.get("region") or "us-central1").strip() or "us-central1"
+    branch = (body.get("branch") or "main").strip() or "main"
+    repo_url = (body.get("repo_url") or "https://github.com/thunderdomeai/thunderdeploy.git").strip()
+
+    project_id, access_token, sa_email = _get_source_build_token_and_project()
+
+    clone_step = {
+        "name": "gcr.io/cloud-builders/git",
+        "entrypoint": "/bin/sh",
+        "args": ["-c", f"git clone --depth 1 --branch {branch} {repo_url}"],
+    }
+    bootstrap_step = {
+        "name": "gcr.io/cloud-builders/gcloud",
+        "entrypoint": "/bin/sh",
+        "dir": "thunderdeploy",
+        "env": [f"PROJECT_ID={project_id}", f"REGION={region}", "DEBIAN_FRONTEND=noninteractive"],
+        "args": [
+            "-c",
+            "apt-get update && apt-get install -y make && PROJECT_ID=${PROJECT_ID} REGION=${REGION} make bootstrap-provider",
+        ],
+    }
+
+    build_body: Dict[str, Any] = {
+        "steps": [clone_step, bootstrap_step],
+        "timeout": "1800s",
+        "options": {"substitutionOption": "ALLOW_LOOSE"},
+        "tags": ["bootstrap-provider", "unified-ui"],
+    }
+    if sa_email:
+        build_body["serviceAccount"] = sa_email
+
+    url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=build_body)
+    except httpx.RequestError as exc:
+        logger.error("Cloud Build bootstrap request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud Build.")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+
+    if resp.is_error or payload is None:
+        detail = payload or resp.text
+        logger.error("Cloud Build bootstrap failed: %s", detail)
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    result = {
+        "projectId": project_id,
+        "region": region,
+        "buildId": payload.get("id"),
+        "status": payload.get("status"),
+        "logUrl": payload.get("logUrl"),
+        "branch": branch,
+        "repo": repo_url,
+    }
+    return JSONResponse(result, status_code=resp.status_code)
 
 
 # --- Deploy configuration store (simple JSON persisted on disk) ---

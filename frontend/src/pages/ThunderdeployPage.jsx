@@ -33,7 +33,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import TenantProvisioningForm from "../components/TenantProvisioningForm.jsx";
 import { getAccessTokenFromServiceAccount, GOOGLE_CLOUD_SCOPES } from "../utils/deployGoogleAuth.js";
 import { fetchJobExecutionLogs } from "../utils/deployLogs.js";
-import { triggerDeploy, getJob, getJobStatus, fetchProviderHealth } from "../utils/api.js";
+import { triggerDeploy, getJob, getJobStatus, fetchProviderHealth, bootstrapProvider } from "../utils/api.js";
 
 const defaultGithubToken =
   import.meta.env.VITE_GITHUB_TOKEN ||
@@ -62,6 +62,18 @@ const defaultConfig = {
   bucket_mounts: [],
   rawBuckets: "",
 };
+
+const PROVIDER_REGION_OPTIONS = [
+  "us-central1",
+  "us-east1",
+  "us-east4",
+  "us-west1",
+  "us-west2",
+  "europe-west1",
+  "europe-west4",
+  "asia-south1",
+  "asia-southeast1",
+];
 
 // ----- Validation & Helper Functions (ellipsis for brevity) -----
 function validateBucketName(name) {
@@ -234,6 +246,11 @@ export default function ThunderdeployPage() {
   const [providerHealth, setProviderHealth] = useState(null);
   const [providerHealthLoading, setProviderHealthLoading] = useState(false);
   const [providerHealthError, setProviderHealthError] = useState("");
+  const [bootstrapRegion, setBootstrapRegion] = useState("us-central1");
+  const [bootstrapBranch, setBootstrapBranch] = useState("main");
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapResult, setBootstrapResult] = useState(null);
+  const [bootstrapError, setBootstrapError] = useState("");
 
   const sourceCredentialStore = useCredentialStore('source');
   const targetCredentialStore = useCredentialStore('target');
@@ -245,6 +262,14 @@ export default function ThunderdeployPage() {
   const activeTargetCredential = useMemo(
     () => targetCredentialStore.entries.find((entry) => entry.id === targetCredentialStore.selectedId) ?? null,
     [targetCredentialStore.entries, targetCredentialStore.selectedId],
+  );
+  const providerProjectId = useMemo(
+    () =>
+      activeSourceCredential?.projectId ||
+      activeSourceCredential?.credential?.project_id ||
+      providerHealth?.source_credential?.projectId ||
+      "",
+    [activeSourceCredential, providerHealth],
   );
 
   const globalServiceAccountFile = activeSourceCredential?.credential ?? null;
@@ -1759,6 +1784,101 @@ export default function ThunderdeployPage() {
     setSnackbarOpen(true);
   };
 
+  const triggerProviderBootstrap = useCallback(async () => {
+    if (!providerProjectId) {
+      setSnackbarMessage("Select an active source credential to determine the provider project.");
+      setSnackbarOpen(true);
+      return;
+    }
+    setBootstrapError("");
+    setBootstrapResult(null);
+    setBootstrapLoading(true);
+    try {
+      const result = await bootstrapProvider({
+        region: bootstrapRegion,
+        branch: bootstrapBranch,
+      });
+      setBootstrapResult(result);
+      const buildLabel = result.buildId ? `Build ${result.buildId}` : "Bootstrap";
+      setSnackbarMessage(`${buildLabel} started for ${result.projectId || providerProjectId}.`);
+      setSnackbarOpen(true);
+    } catch (err) {
+      setBootstrapError(err.detail || err.message || "Failed to start provider bootstrap.");
+    } finally {
+      setBootstrapLoading(false);
+    }
+  }, [bootstrapRegion, bootstrapBranch, providerProjectId]);
+
+  const renderProviderBootstrapCard = () => {
+    return (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack spacing={2}>
+          <Typography variant="h6">Bootstrap provider project</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Use the active source credential to prime the provider project and deploy TriggerService (concurrency=1) plus core services via Cloud Build.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Provider project"
+                value={providerProjectId || ""}
+                disabled
+                helperText={hasActiveSourceCredential ? "From the selected source credential" : "Select a source credential first"}
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                select
+                fullWidth
+                label="Region"
+                value={bootstrapRegion}
+                onChange={(e) => setBootstrapRegion(e.target.value)}
+                helperText="Region for Cloud Run/Cloud SQL during bootstrap"
+              >
+                {PROVIDER_REGION_OPTIONS.map((rgn) => (
+                  <MenuItem key={rgn} value={rgn}>
+                    {rgn}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Branch"
+                value={bootstrapBranch}
+                onChange={(e) => setBootstrapBranch(e.target.value)}
+                helperText="thunderdeploy branch for bootstrap (default: main)"
+              />
+            </Grid>
+          </Grid>
+          {bootstrapError ? <Alert severity="error">{bootstrapError}</Alert> : null}
+          {bootstrapResult ? (
+            <Alert severity="info">
+              Bootstrap build {bootstrapResult.buildId || "submitted"} ({bootstrapResult.status || "QUEUED"}).{" "}
+              {bootstrapResult.logUrl ? (
+                <Link href={bootstrapResult.logUrl} target="_blank" rel="noopener noreferrer">
+                  View logs
+                </Link>
+              ) : null}
+            </Alert>
+          ) : null}
+          <Box display="flex" justifyContent="flex-end">
+            <Button
+              variant="contained"
+              onClick={triggerProviderBootstrap}
+              disabled={bootstrapLoading || !hasActiveSourceCredential || !providerProjectId}
+              startIcon={bootstrapLoading ? <CircularProgress size={16} color="inherit" /> : null}
+            >
+              {bootstrapLoading ? "Starting bootstrap..." : "Bootstrap provider"}
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    );
+  };
+
   const renderProviderHealthAlert = () => {
     if (providerHealthLoading) {
       return <Alert severity="info">Checking provider setup…</Alert>;
@@ -1913,6 +2033,7 @@ export default function ThunderdeployPage() {
           {isTenantsView ? (
             <Stack spacing={2}>
               {renderProviderHealthAlert()}
+              {renderProviderBootstrapCard()}
               <TenantProvisioningForm
                 serviceAccount={globalServiceAccountFile}
                 customerServiceAccount={globalCustomerServiceAccountFile}
