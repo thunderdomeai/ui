@@ -96,6 +96,32 @@ function applyTenantPlaceholders(userrequirements, { tenantProjectId, tenantSlug
   return walk(cloned);
 }
 
+function fillGithubToken(userrequirements, githubToken) {
+  if (!githubToken) return userrequirements;
+  const cloned = JSON.parse(JSON.stringify(userrequirements));
+  const maybeSetToken = (env) => {
+    if (!env || typeof env !== "object") return env;
+    const token = env.github_token;
+    if (!token || typeof token !== "string" || token.includes("REPLACE_ME") || token === "PLACEHOLDER") {
+      return { ...env, github_token: githubToken };
+    }
+    return env;
+  };
+  if (Array.isArray(cloned.agents)) {
+    cloned.agents = cloned.agents.map((agent) => ({
+      ...agent,
+      environment: maybeSetToken(agent.environment),
+    }));
+  }
+  if (Array.isArray(cloned.repositories)) {
+    cloned.repositories = cloned.repositories.map((repo) => ({
+      ...repo,
+      environment: maybeSetToken(repo.environment),
+    }));
+  }
+  return cloned;
+}
+
 export default function TenantProvisioningForm({ serviceAccount, customerServiceAccount, providerHealth }) {
   const [formData, setFormData] = useState({
     clientName: "",
@@ -349,9 +375,10 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         ...userrequirements,
         tenant_config: tenantConfig,
       };
+      const finalUserrequirementsWithToken = fillGithubToken(finalUserrequirements, defaultGithubToken);
 
       const responseData = await triggerDeploy({
-        userrequirements: finalUserrequirements,
+        userrequirements: finalUserrequirementsWithToken,
         serviceaccount: serviceAccount,
         customer_serviceaccount: customerServiceAccount,
       });

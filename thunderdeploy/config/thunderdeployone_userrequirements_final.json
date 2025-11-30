@@ -14,7 +14,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/web-research-agent.git",
         "branch": "ynv",
         "service_name": "autodeploy-webresearch-main-svc",
         "extra_env": {
@@ -40,7 +40,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/schedulingmonitor.git",
         "branch": "ynv",
         "service_name": "autodeploy-schedulingmonitor-main-svc",
         "extra_env": {
@@ -79,7 +79,7 @@
           }
         ],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/mcpclientagent.git",
         "branch": "ynv",
         "service_name": "autodeploy-mcpclientagent-ynv-svc",
         "extra_env": {
@@ -121,7 +121,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/schedulingagent.git",
         "branch": "ynv",
         "service_name": "autodeploy-schedulingagent-main-svc",
         "extra_env": {
@@ -160,7 +160,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/ThunderdomeCore.git",
         "branch": "ynv",
         "service_name": "autodeploy-thunderdomecore-ynv-svc",
         "extra_env": {
@@ -183,7 +183,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/whatsapphandler.git",
         "branch": "main",
         "service_name": "autodeploy-whatsapphandler-main-svc",
         "extra_env": {
@@ -214,7 +214,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/user_portal.git",
         "branch": "main",
         "service_name": "autodeploy-userportal-main-svc",
         "extra_env": {
@@ -243,7 +243,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/thundermcpsql.git",
         "branch": "broker-executor",
         "service_name": "autodeploy-thundermcpsql-broker-executor-svc",
         "extra_env": {
@@ -270,7 +270,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/mcpregistry.git",
         "branch": "main",
         "service_name": "autodeploy-mcpregistry-main-svc",
         "extra_env": {
@@ -292,7 +292,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/broker.git",
         "branch": "main",
         "service_name": "broker",
         "extra_env": {}
@@ -314,7 +314,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/web-research-agent.git",
         "branch": "ynv",
         "service_name": "autodeploy-webresearch-main-svc",
         "extra_env": {
@@ -339,7 +339,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/schedulingmonitor.git",
         "branch": "ynv",
         "service_name": "autodeploy-schedulingmonitor-main-svc",
         "extra_env": {
@@ -377,7 +377,7 @@
           }
         ],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/mcpclientagent.git",
         "branch": "ynv",
         "service_name": "autodeploy-mcpclientagent-ynv-svc",
         "extra_env": {
@@ -418,7 +418,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/schedulingagent.git",
         "branch": "ynv",
         "service_name": "autodeploy-schedulingagent-main-svc",
         "extra_env": {
@@ -456,7 +456,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/ThunderdomeCore.git",
         "branch": "ynv",
         "service_name": "autodeploy-thunderdomecore-ynv-svc",
         "extra_env": {
@@ -479,7 +479,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/whatsapphandler.git",
         "branch": "main",
         "service_name": "autodeploy-whatsapphandler-main-svc",
         "extra_env": {
@@ -515,7 +515,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/user_portal.git",
         "branch": "main",
         "service_name": "autodeploy-userportal-main-svc",
         "extra_env": {
@@ -544,7 +544,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/thundermcpsql.git",
         "branch": "broker-executor",
         "service_name": "autodeploy-thundermcpsql-broker-executor-svc",
         "extra_env": {
@@ -570,7 +570,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/mcpregistry.git",
         "branch": "main",
         "service_name": "autodeploy-mcpregistry-main-svc",
         "extra_env": {}
@@ -590,7 +590,7 @@
         "buckets": [],
         "bucket_mounts": [],
         "tenant_id": "{{TENANT_ID}}",
-        "repo_url": "PLACEHOLDER",
+        "repo_url": "https://github.com/thunderdomeai/broker.git",
         "branch": "main",
         "service_name": "autodeploy-sapb1-broker",
         "extra_env": {}
