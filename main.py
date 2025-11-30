@@ -63,6 +63,7 @@ THUNDERDEPLOY_BASE_URL = _normalize_base_url(os.getenv("THUNDERDEPLOY_BASE_URL")
 WEB_RESEARCH_BASE_URL = _normalize_base_url(os.getenv("WEB_RESEARCH_BASE_URL"))
 CHEATSHEET_BASE_URL = _normalize_base_url(os.getenv("CHEATSHEET_BASE_URL"))
 AGENT_REGISTRY_BASE_URL = _normalize_base_url(os.getenv("AGENT_REGISTRY_BASE_URL") or "https://thunderagents-497847265153.us-central1.run.app")
+AGENTONE_CONFIGURATOR_URL = _normalize_base_url(os.getenv("AGENTONE_CONFIGURATOR_URL") or "https://agentone-configurator-176446471226.us-central1.run.app")
 TRIGGERSERVICE_BASE_URL = THUNDERDEPLOY_BASE_URL
 TRIGGERSERVICE_BASE_URL = _normalize_base_url(
     os.getenv("TRIGGERSERVICE_BASE_URL")
@@ -221,6 +222,7 @@ def _inject_frontend_config(index_html: str) -> str:
         "AGENT_REGISTRY_BASE_URL": AGENT_REGISTRY_BASE_URL,
         "DEFAULT_GITHUB_TOKEN": DEFAULT_GITHUB_TOKEN,
         "githubToken": DEFAULT_GITHUB_TOKEN,
+        "AGENTONE_CONFIGURATOR_URL": AGENTONE_CONFIGURATOR_URL,
     }
     script = "<script>window.__UNIFIED_UI_CONFIG__ = {cfg};</script>".format(
         cfg=json.dumps(config)
@@ -1575,6 +1577,71 @@ async def mcp_users(request: Request) -> JSONResponse:
         method="GET",
         base_url=MCP_REGISTRY_BASE_URL,
         endpoint="/users",
+    )
+
+
+# --- Agent One Configurator proxies ---
+
+
+@app.get("/api/agentone/configs")
+async def agentone_configs(request: Request) -> JSONResponse:
+    return await _proxy_request(
+        request,
+        method="GET",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint="/configs",
+    )
+
+
+@app.get("/api/agentone/config/{api_key}")
+async def agentone_config_get(api_key: str, request: Request) -> JSONResponse:
+    return await _proxy_request(
+        request,
+        method="GET",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint=f"/config/{api_key}",
+    )
+
+
+@app.post("/api/agentone/config")
+async def agentone_config_create(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    return await _proxy_request(
+        request,
+        method="POST",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint="/config",
+        json_body=body,
+    )
+
+
+@app.put("/api/agentone/config/{api_key}")
+async def agentone_config_update(api_key: str, request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    return await _proxy_request(
+        request,
+        method="PUT",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint=f"/config/{api_key}",
+        json_body=body,
+    )
+
+
+@app.delete("/api/agentone/config/{api_key}")
+async def agentone_config_delete(api_key: str, request: Request) -> JSONResponse:
+    return await _proxy_request(
+        request,
+        method="DELETE",
+        base_url=AGENTONE_CONFIGURATOR_URL,
+        endpoint=f"/config/{api_key}",
     )
 
 
