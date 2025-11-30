@@ -241,7 +241,7 @@ export default function CredentialsPage() {
         Credentials, Verification, and Priming
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Upload source/target service accounts, verify permissions, prime the customer project, then activate the primed credentials for deploys and monitoring.
+        Upload source/target service accounts, verify permissions, prime the customer project, then activate (verified sources or primed targets) for deploys and monitoring.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
@@ -258,7 +258,7 @@ export default function CredentialsPage() {
             size="small"
           />
           <Typography variant="body2" color="text.secondary">
-            Only primed credentials can be activated and used on deploy/monitor pages.
+            Targets must be primed; sources can be activated once verified. Deploy/monitor pages require an active source + target.
           </Typography>
         </Stack>
       </Alert>
@@ -297,7 +297,7 @@ export default function CredentialsPage() {
           </SectionCard>
           <SectionCard
             title={`Stored ${tab} credentials`}
-            subtitle="Verify, prime, then activate primed entries."
+            subtitle="Verify sources or prime targets, then activate."
           >
             <List dense>
               {store.entries.map((entry) => {
@@ -315,7 +315,7 @@ export default function CredentialsPage() {
                         {isActive ? (
                           <Chip size="small" color="success" label="Active" />
                         ) : (
-                          <Tooltip title={isPrimed || entry.status === "verified" ? "Activate this credential." : "Verify before activation."}>
+                          <Tooltip title={isPrimed || entry.status === "verified" ? "Activate this credential." : "Verify (source) or prime (target) before activation."}>
                             <span>
                               <Button
                                 size="small"
@@ -352,7 +352,7 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={7}>
           <SectionCard
             title="Readiness + priming"
-            subtitle="Step 1: verify permissions. Step 2: prime (target only). Step 3: activate."
+            subtitle="Step 1: verify permissions. Step 2: prime (target only). Step 3: activate (verified sources or primed targets)."
           >
             <Stack spacing={1.5}>
               <FormControl fullWidth>
