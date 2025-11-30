@@ -306,7 +306,16 @@ def _normalize_type(type_name: str) -> str:
     return type_name
 
 
-def _normalize_store_payload(raw: Any) -> Dict[str, Any]:
+def _entry_activation_allowed(type_name: str, entry: Dict[str, Any]) -> bool:
+    status = entry.get("status")
+    if status == "primed":
+        return True
+    if type_name == "source" and status == "verified":
+        return True
+    return False
+
+
+def _normalize_store_payload(raw: Any, type_name: str) -> Dict[str, Any]:
     if not isinstance(raw, dict):
         return _empty_store()
     store = _empty_store()
@@ -319,7 +328,7 @@ def _normalize_store_payload(raw: Any) -> Dict[str, Any]:
 
     if store["selectedId"]:
         entry = store["entries"].get(store["selectedId"])
-        if not entry or entry.get("status") != "primed":
+        if not entry or not _entry_activation_allowed(type_name, entry):
             store["selectedId"] = None
     return store
 
@@ -358,7 +367,7 @@ def _load_store(type_name: str) -> Dict[str, Any]:
             if not blob.exists():
                 return _empty_store()
             raw_text = blob.download_as_text(encoding="utf-8")
-            return _normalize_store_payload(json.loads(raw_text))
+            return _normalize_store_payload(json.loads(raw_text), type_name)
         except gcs_exceptions.GoogleAPIError as exc:
             logger.error("Failed to read %s credential store from GCS: %s", type_name, exc)
             raise HTTPException(status_code=500, detail="Unable to load credentials from bucket.")
@@ -371,7 +380,7 @@ def _load_store(type_name: str) -> Dict[str, Any]:
         return _empty_store()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return _normalize_store_payload(raw)
+        return _normalize_store_payload(raw, type_name)
     except Exception:
         return _empty_store()
 
@@ -445,8 +454,12 @@ async def credential_store_select(type_name: str, request: Request) -> JSONRespo
         raise HTTPException(status_code=404, detail="Credential not found")
     if selected_id:
         entry = store["entries"].get(selected_id)
-        if not entry or entry.get("status") != "primed":
-            raise HTTPException(status_code=400, detail="Credential must be primed before activation.")
+        if not entry:
+            raise HTTPException(status_code=404, detail="Credential not found")
+        if not _entry_activation_allowed(t, entry):
+            if t == "source":
+                raise HTTPException(status_code=400, detail="Source credential must be verified or primed before activation.")
+            raise HTTPException(status_code=400, detail="Target credential must be primed before activation.")
     store["selectedId"] = selected_id
     _write_store(t, store)
     return JSONResponse({}, status_code=204)

@@ -35,6 +35,15 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(Boolean(autoLoad));
   const [error, setError] = useState(null);
+  const canActivate = useCallback(
+    (entry) => {
+      if (!entry) return false;
+      if (entry.status === "primed") return true;
+      if (type === "source" && entry.status === "verified") return true;
+      return false;
+    },
+    [type]
+  );
 
   const loadStore = useCallback(async () => {
     setLoading(true);
@@ -123,8 +132,11 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
     async (entryId) => {
       if (entryId) {
         const entry = entries.find((e) => e.id === entryId);
-        if (entry && entry.status !== "primed") {
-          throw new Error("Only primed credentials can be activated.");
+        if (entry && !canActivate(entry)) {
+          if (type === "source") {
+            throw new Error("Verify the source credential before activation.");
+          }
+          throw new Error("Prime the target credential before activation.");
         }
       }
       const response = await fetch(`/api/credential-store/${type}/selection`, {
@@ -142,7 +154,7 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
 
       setSelectedId(entryId ?? null);
     },
-    [type, entries]
+    [type, entries, canActivate]
   );
 
   return useMemo(

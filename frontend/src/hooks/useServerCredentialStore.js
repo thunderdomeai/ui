@@ -6,6 +6,16 @@ export function useServerCredentialStore(type) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const canActivate = useCallback(
+    (entry) => {
+      if (!entry) return false;
+      if (entry.status === "primed") return true;
+      if (type === "source" && entry.status === "verified") return true;
+      return false;
+    },
+    [type]
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -62,8 +72,11 @@ export function useServerCredentialStore(type) {
     async (id) => {
       if (id) {
         const entry = entries.find((e) => e.id === id);
-        if (entry && entry.status !== "primed") {
-          throw new Error("Only primed credentials can be activated.");
+        if (entry && !canActivate(entry)) {
+          if (type === "source") {
+            throw new Error("Verify the source credential before activation.");
+          }
+          throw new Error("Prime the target credential before activation.");
         }
       }
       const res = await fetch(`/api/credential-store/${type}/selection`, {
@@ -77,7 +90,7 @@ export function useServerCredentialStore(type) {
       }
       setSelectedId(id);
     },
-    [type, entries]
+    [type, entries, canActivate]
   );
 
   const removeEntry = useCallback(

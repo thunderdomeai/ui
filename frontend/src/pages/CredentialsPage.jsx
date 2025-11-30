@@ -315,12 +315,12 @@ export default function CredentialsPage() {
                         {isActive ? (
                           <Chip size="small" color="success" label="Active" />
                         ) : (
-                          <Tooltip title={isPrimed ? "Activate this primed credential." : "Prime before activation."}>
+                          <Tooltip title={isPrimed || entry.status === "verified" ? "Activate this credential." : "Verify before activation."}>
                             <span>
                               <Button
                                 size="small"
                                 variant="outlined"
-                                disabled={!isPrimed}
+                                disabled={!(isPrimed || entry.status === "verified")}
                                 onClick={() => store.selectEntry(entry.id)}
                               >
                                 Activate
