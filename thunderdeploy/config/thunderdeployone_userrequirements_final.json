@@ -1,0 +1,600 @@
+{
+  "agents": [
+    {
+      "name": "autodeploy-webresearch-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-webresearch-main-svc",
+        "extra_env": {
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "GEMINI_API_KEY": "PLACEHOLDER",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER",
+          "DB_HOST": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-schedulingmonitor-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-schedulingmonitor-main-svc",
+        "extra_env": {
+          "TASKS_QUEUE": "agent-queue",
+          "TASKS_CALLER_SA": "PLACEHOLDER",
+          "RUN_BASE_URL": "PLACEHOLDER",
+          "REGION": "{{REGION}}",
+          "GOOGLE_CLOUD_PROJECT": "{{PROJECT_ID}}",
+          "CLAIM_LIMIT": "100",
+          "PROCESSING_TTL": "2 minutes",
+          "GETUSER_URL": "PLACEHOLDER",
+          "WHATSAPP_HANDLER_URL": "PLACEHOLDER",
+          "EMAIL_HANDLER_URL": "PLACEHOLDER",
+          "DB_CONNECTION": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-mcpclientagent-ynv-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [
+          "mcpsql-ynv"
+        ],
+        "bucket_mounts": [
+          {
+            "bucket": "mcpsql-ynv",
+            "mount_path": "/cloudstorage"
+          }
+        ],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-mcpclientagent-ynv-svc",
+        "extra_env": {
+          "ADMIN_KEY": "PLACEHOLDER",
+          "AZURE_ENDPOINT": "PLACEHOLDER",
+          "AZURE_OPENAI_API_KEY": "PLACEHOLDER",
+          "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
+          "CDB_DIRECTORY_PATH": "/cloudstorage/chroma_db_desc_only",
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "DEFAULT_LLM_PROVIDER": "openai",
+          "DEFAULT_MAX_TOKENS": "PLACEHOLDER",
+          "DEFAULT_MODEL": "gpt-5-2025-08-07",
+          "DEFAULT_TEMPERATURE": "0.0",
+          "DEFAULT_TOOL_MODEL": "gpt-4.1-2025-04-14",
+          "GEMINI_API_KEY": "PLACEHOLDER",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER",
+          "MCP_BASE_URL": "PLACEHOLDER",
+          "OPENAI_API_BASE": "https://api.openai.com/v1",
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "OUQR_CDB_PATH": "/cloudstorage/ouqr_chroma_db",
+          "RAG_EMBEDDING_MODEL": "text-embedding-3-large",
+          "DB_HOST": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-schedulingagent-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-schedulingagent-main-svc",
+        "extra_env": {
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "OPENAI_API_BASE": "https://api.openai.com/v1",
+          "AZURE_OPENAI_API_KEY": "PLACEHOLDER",
+          "AZURE_ENDPOINT": "PLACEHOLDER",
+          "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER",
+          "LANGCHAIN_API_KEY": "PLACEHOLDER",
+          "LANGCHAIN_TRACING_V2": "true",
+          "LANGCHAIN_ENDPOINT": "PLACEHOLDER",
+          "LANGCHAIN_PROJECT": "default_project",
+          "DEFAULT_LLM_PROVIDER": "openai",
+          "DEFAULT_MODEL": "gpt-4.1-2025-04-14",
+          "DEFAULT_TEMPERATURE": "0.0",
+          "DEFAULT_MAX_TOKENS": "PLACEHOLDER",
+          "DB_CONNECTION": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-thunderdomecore-ynv-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-thunderdomecore-ynv-svc",
+        "extra_env": {
+          "LOGGER_NAME": "ThunderdomeCore",
+          "DATABASE_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-whatsapphandler-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-whatsapphandler-main-svc",
+        "extra_env": {
+          "TWILIO_ACCOUNT_SID": "PLACEHOLDER",
+          "TWILIO_AUTH_TOKEN": "PLACEHOLDER",
+          "TWILIO_PHONE_NUMBER": "+17177167119",
+          "AI_ASSISTANT_BASE_URL": "PLACEHOLDER",
+          "AI_ASSISTANT_CHAT_ENDPOINT": "PLACEHOLDER",
+          "DATABASE_URL": "PLACEHOLDER",
+          "PUBLIC_API": "https://autodeploy-whatsapphandler-main-svc-176446471226.{{REGION}}.run.app",
+          "LOGGER_NAME": "WhatsappHandler",
+          "WHATSAPP_TEMPLATE_SID": "PLACEHOLDER",
+          "SCHEDULER_BASE_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-userportal-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-userportal-main-svc",
+        "extra_env": {
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "VITE_MAIN_API_URL": "PLACEHOLDER",
+          "middleware_key": "PLACEHOLDER",
+          "decode_key": "PLACEHOLDER",
+          "key_sample": "PLACEHOLDER",
+          "RAG_BACKEND": "https://thunderrag-497847265153.{{REGION}}.run.app/",
+          "CUSTOMER_ID": "176446471226"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-thundermcpsql-broker-executor-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "broker-executor",
+        "service_name": "autodeploy-thundermcpsql-broker-executor-svc",
+        "extra_env": {
+          "BROKER_AGENT_ID": "agentone",
+          "BROKER_DATABASE_ALIAS": "QFX_online",
+          "BROKER_API_KEY": "PLACEHOLDER",
+          "BROKER_URL": "PLACEHOLDER",
+          "QUERY_EXECUTION_STRATEGY": "broker",
+          "DB_HOST": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-mcpregistry-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-mcpregistry-main-svc",
+        "extra_env": {
+          "DB_HOST": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-sapb1-broker",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "broker",
+        "extra_env": {}
+      }
+    }
+  ],
+  "repositories": [
+    {
+      "name": "autodeploy-webresearch-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-webresearch-main-svc",
+        "extra_env": {
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "GEMINI_API_KEY": "PLACEHOLDER",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-schedulingmonitor-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-schedulingmonitor-main-svc",
+        "extra_env": {
+          "TASKS_QUEUE": "agent-queue",
+          "TASKS_CALLER_SA": "PLACEHOLDER",
+          "RUN_BASE_URL": "PLACEHOLDER",
+          "REGION": "{{REGION}}",
+          "GOOGLE_CLOUD_PROJECT": "{{PROJECT_ID}}",
+          "CLAIM_LIMIT": "100",
+          "PROCESSING_TTL": "2 minutes",
+          "GETUSER_URL": "PLACEHOLDER",
+          "WHATSAPP_HANDLER_URL": "PLACEHOLDER",
+          "EMAIL_HANDLER_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-mcpclientagent-ynv-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [
+          "mcpsql-ynv"
+        ],
+        "bucket_mounts": [
+          {
+            "bucket": "mcpsql-ynv",
+            "mount_path": "/cloudstorage"
+          }
+        ],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-mcpclientagent-ynv-svc",
+        "extra_env": {
+          "ADMIN_KEY": "PLACEHOLDER",
+          "AZURE_ENDPOINT": "PLACEHOLDER",
+          "AZURE_OPENAI_API_KEY": "PLACEHOLDER",
+          "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
+          "CDB_DIRECTORY_PATH": "/cloudstorage/chroma_db_desc_only",
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "DEFAULT_LLM_PROVIDER": "openai",
+          "DEFAULT_MAX_TOKENS": "PLACEHOLDER",
+          "DEFAULT_MODEL": "gpt-5-2025-08-07",
+          "DEFAULT_TEMPERATURE": "0.0",
+          "DEFAULT_TOOL_MODEL": "gpt-4.1-2025-04-14",
+          "GEMINI_API_KEY": "PLACEHOLDER",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER",
+          "MCP_BASE_URL": "PLACEHOLDER",
+          "OPENAI_API_BASE": "https://api.openai.com/v1",
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "OUQR_CDB_PATH": "/cloudstorage/ouqr_chroma_db",
+          "RAG_EMBEDDING_MODEL": "text-embedding-3-large"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-schedulingagent-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-schedulingagent-main-svc",
+        "extra_env": {
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "OPENAI_API_KEY": "PLACEHOLDER",
+          "OPENAI_API_BASE": "https://api.openai.com/v1",
+          "AZURE_OPENAI_API_KEY": "PLACEHOLDER",
+          "AZURE_ENDPOINT": "PLACEHOLDER",
+          "AZURE_OPENAI_API_VERSION": "2024-08-01-preview",
+          "LITELLM_API_KEY": "PLACEHOLDER",
+          "LITELLM_SERVER_URL": "PLACEHOLDER",
+          "LANGCHAIN_API_KEY": "PLACEHOLDER",
+          "LANGCHAIN_TRACING_V2": "true",
+          "LANGCHAIN_ENDPOINT": "PLACEHOLDER",
+          "LANGCHAIN_PROJECT": "default_project",
+          "DEFAULT_LLM_PROVIDER": "openai",
+          "DEFAULT_MODEL": "gpt-4.1-2025-04-14",
+          "DEFAULT_TEMPERATURE": "0.0",
+          "DEFAULT_MAX_TOKENS": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-thunderdomecore-ynv-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "ynv",
+        "service_name": "autodeploy-thunderdomecore-ynv-svc",
+        "extra_env": {
+          "LOGGER_NAME": "ThunderdomeCore",
+          "DATABASE_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-whatsapphandler-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-whatsapphandler-main-svc",
+        "extra_env": {
+          "TWILIO_ACCOUNT_SID": "PLACEHOLDER",
+          "TWILIO_AUTH_TOKEN": "PLACEHOLDER",
+          "TWILIO_PHONE_NUMBER": "+17177167119",
+          "AI_ASSISTANT_BASE_URL": "PLACEHOLDER",
+          "AI_ASSISTANT_CHAT_ENDPOINT": "PLACEHOLDER",
+          "DATABASE_URL": "PLACEHOLDER",
+          "DB_CONNECTION_NAME": "PLACEHOLDER",
+          "DB_NAME": "PLACEHOLDER",
+          "DB_PASSWORD": "PLACEHOLDER",
+          "DB_USER": "PLACEHOLDER",
+          "GETUSER_URL": "PLACEHOLDER",
+          "PUBLIC_API": "https://autodeploy-whatsapphandler-main-svc-176446471226.{{REGION}}.run.app",
+          "LOGGER_NAME": "WhatsappHandler",
+          "WHATSAPP_TEMPLATE_SID": "PLACEHOLDER",
+          "SCHEDULER_BASE_URL": "PLACEHOLDER"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-userportal-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-userportal-main-svc",
+        "extra_env": {
+          "COMPOSIO_API_KEY": "PLACEHOLDER",
+          "COMPOSIO_LOGGING_LEVEL": "DEBUG",
+          "VITE_MAIN_API_URL": "PLACEHOLDER",
+          "middleware_key": "PLACEHOLDER",
+          "decode_key": "PLACEHOLDER",
+          "key_sample": "PLACEHOLDER",
+          "RAG_BACKEND": "https://thunderrag-497847265153.{{REGION}}.run.app/",
+          "CUSTOMER_ID": "176446471226"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-thundermcpsql-broker-executor-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "broker-executor",
+        "service_name": "autodeploy-thundermcpsql-broker-executor-svc",
+        "extra_env": {
+          "BROKER_AGENT_ID": "agentone",
+          "BROKER_DATABASE_ALIAS": "QFX_online",
+          "BROKER_API_KEY": "PLACEHOLDER",
+          "BROKER_URL": "PLACEHOLDER",
+          "QUERY_EXECUTION_STRATEGY": "broker"
+        }
+      }
+    },
+    {
+      "name": "autodeploy-mcpregistry-main-svc",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-mcpregistry-main-svc",
+        "extra_env": {}
+      }
+    },
+    {
+      "name": "autodeploy-sapb1-broker",
+      "environment": {
+        "project_id": "{{PROJECT_ID}}",
+        "region": "{{REGION}}",
+        "github_token": "PLACEHOLDER",
+        "connectDatabase": true,
+        "database_instance": "{{DB_INSTANCE}}",
+        "database_name": "{{DB_NAME}}",
+        "db_username": "{{DB_USERNAME}}",
+        "db_password": "PLACEHOLDER",
+        "buckets": [],
+        "bucket_mounts": [],
+        "tenant_id": "{{TENANT_ID}}",
+        "repo_url": "PLACEHOLDER",
+        "branch": "main",
+        "service_name": "autodeploy-sapb1-broker",
+        "extra_env": {}
+      }
+    }
+  ]
+}
