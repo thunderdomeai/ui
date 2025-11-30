@@ -93,6 +93,8 @@ def _placeholder_for_key(key: str | None) -> str | None:
     if not key:
         return None
     lower = key.lower()
+    if lower == "repo_url":
+        return None
     if lower in STRICT_PLACEHOLDERS:
         return STRICT_PLACEHOLDERS[lower]
     if any(keyword in lower for keyword in URL_KEYWORDS):
