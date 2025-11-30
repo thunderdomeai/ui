@@ -54,6 +54,7 @@ export default function CredentialsPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [focusEntryId, setFocusEntryId] = useState("");
+  const [includeConfiguratorBucket, setIncludeConfiguratorBucket] = useState(true);
 
   const activeSource = sourceStore.activeEntry;
   const activeTarget = targetStore.activeEntry;
@@ -173,12 +174,16 @@ export default function CredentialsPage() {
     setStatusMsg("");
     try {
       setVerifyResult(null);
+      const extraBuckets = [];
+      if (tab === "source" && includeConfiguratorBucket && workingProjectId) {
+        extraBuckets.push(`${workingProjectId}-agentone-configs`);
+      }
       const payload = {
         service_account: workingEntry.credential,
         project_id: workingProjectId,
         region,
         include_defaults: true,
-        extra_buckets: [],
+        extra_buckets: extraBuckets,
       };
       const data = await primeCustomer(payload);
       setPrimeResult(data);
@@ -415,6 +420,17 @@ export default function CredentialsPage() {
                   ) : null}
                 </Select>
               </FormControl>
+              {tab === "source" ? (
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={includeConfiguratorBucket}
+                      onChange={(e) => setIncludeConfiguratorBucket(e.target.checked)}
+                    />
+                  }
+                  label="Include Agent One configurator bucket (creates <project>-agentone-configs)"
+                />
+              ) : null}
               <TextField label="Region" value={region} onChange={(e) => setRegion(e.target.value)} />
 
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
