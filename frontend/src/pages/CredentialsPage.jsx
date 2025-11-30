@@ -152,10 +152,6 @@ export default function CredentialsPage() {
   };
 
   const handlePrime = async () => {
-    if (tab !== "target") {
-      setError("Priming applies to customer/target accounts.");
-      return;
-    }
     if (!workingEntry) {
       setError("Select a credential to prime.");
       return;
@@ -241,7 +237,7 @@ export default function CredentialsPage() {
         Credentials, Verification, and Priming
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Upload source/target service accounts, verify permissions, prime the customer project, then activate (verified sources or primed targets) for deploys and monitoring.
+        Upload source/target service accounts, verify permissions, prime the project (customer target or provider/source), then activate (verified sources or primed targets) for deploys and monitoring.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
@@ -352,7 +348,7 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={7}>
           <SectionCard
             title="Readiness + priming"
-            subtitle="Step 1: verify permissions. Step 2: prime (target only). Step 3: activate (verified sources or primed targets)."
+            subtitle="Step 1: verify permissions. Step 2: prime (target or provider). Step 3: activate (verified sources or primed targets)."
           >
             <Stack spacing={1.5}>
               <FormControl fullWidth>
@@ -428,17 +424,13 @@ export default function CredentialsPage() {
                 <Button variant="outlined" onClick={handleCheck} disabled={loading || !workingEntry}>
                   Check status
                 </Button>
-                <Tooltip title={tab === "target" ? "" : "Priming only applies to target/customer credentials."}>
-                  <span>
-                    <Button
-                      variant="contained"
-                      onClick={handlePrime}
-                      disabled={loading || tab !== "target" || !workingEntry || workingStatus === "unverified"}
-                    >
-                      Prime project
-                    </Button>
-                  </span>
-                </Tooltip>
+                <Button
+                  variant="contained"
+                  onClick={handlePrime}
+                  disabled={loading || !workingEntry || workingStatus === "unverified"}
+                >
+                  Prime project
+                </Button>
               </Stack>
 
               {statusMsg ? <Alert severity="info">{statusMsg}</Alert> : null}
