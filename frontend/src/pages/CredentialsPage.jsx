@@ -3,6 +3,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Divider,
   Grid,
   IconButton,
@@ -20,6 +21,7 @@ import {
   MenuItem,
   Chip,
   Tooltip,
+  FormControlLabel,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import SectionCard from "../components/SectionCard.jsx";
