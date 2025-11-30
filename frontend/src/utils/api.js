@@ -97,6 +97,13 @@ export async function triggerDeploy(body) {
   });
 }
 
+export async function getJobStatus(jobProjectId, jobRegion, jobName, executionName) {
+  const path = `/api/trigger/job_status/${encodeURIComponent(jobProjectId)}/${encodeURIComponent(
+    jobRegion,
+  )}/${encodeURIComponent(jobName)}/${encodeURIComponent(executionName)}`;
+  return fetchJson(path);
+}
+
 export async function listDeployConfigs() {
   return fetchJson("/api/deploy-configs");
 }
@@ -140,6 +147,14 @@ export async function fetchSampleUserrequirements(path) {
   return fetchJson(`/api/deploy/sample-userrequirements${qs}`);
 }
 
+export async function fetchTenantStackTemplate() {
+  return fetchJson("/api/tenant-stack/template");
+}
+
+export async function listTenantStackTemplates() {
+  return fetchJson("/api/tenant-stack/templates");
+}
+
 export async function fetchRunServices(body) {
   return fetchJson("/api/run/services", {
     method: "POST",
@@ -149,4 +164,8 @@ export async function fetchRunServices(body) {
 
 export async function fetchAgentCatalog() {
   return fetchJson("/api/agent-catalog");
+}
+
+export async function fetchProviderHealth() {
+  return fetchJson("/api/provider/health");
 }

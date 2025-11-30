@@ -33,6 +33,7 @@ import PageLayout from "../components/PageLayout.jsx";
 import TenantProvisioningForm from "../components/TenantProvisioningForm.jsx";
 import { getAccessTokenFromServiceAccount, GOOGLE_CLOUD_SCOPES } from "../utils/deployGoogleAuth.js";
 import { fetchJobExecutionLogs } from "../utils/deployLogs.js";
+import { triggerDeploy, getJob, getJobStatus, fetchProviderHealth } from "../utils/api.js";
 
 const defaultGithubToken =
   import.meta.env.VITE_GITHUB_TOKEN ||
@@ -146,7 +147,6 @@ async function checkBucketAvailability(bucketName, serviceAccount) {
 const SQLADMIN_BASE_URL = "https://sqladmin.googleapis.com/sql/v1beta4";
 // Use the backend proxy to the agent catalog to avoid CORS/HTML fallbacks in Cloud Run.
 const AGENT_REGISTRY_BASE_URL = "/api/agent-catalog";
-const TRIGGER_SERVICE_BASE_URL = "https://triggerservice-497847265153.us-central1.run.app";
 async function checkCloudSqlInstanceAndDb(projectId, instanceName, dbName, serviceAccount) {
   let token;
   try { token = await getAccessTokenFromServiceAccount(serviceAccount, GOOGLE_CLOUD_SCOPES.CLOUD_PLATFORM); }
@@ -231,6 +231,9 @@ export default function ThunderdeployPage() {
   const [draggingAgent, setDraggingAgent] = useState(null);
   const [draggingInstance, setDraggingInstance] = useState(null);
   const [waveDeploying, setWaveDeploying] = useState(false);
+  const [providerHealth, setProviderHealth] = useState(null);
+  const [providerHealthLoading, setProviderHealthLoading] = useState(false);
+  const [providerHealthError, setProviderHealthError] = useState("");
 
   const sourceCredentialStore = useCredentialStore('source');
   const targetCredentialStore = useCredentialStore('target');
@@ -501,6 +504,23 @@ export default function ThunderdeployPage() {
   }, [fetchAgentList]);
 
   useEffect(() => {
+    if (!isTenantsView) return;
+    setProviderHealthLoading(true);
+    setProviderHealthError("");
+    fetchProviderHealth()
+      .then((data) => {
+        setProviderHealth(data);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch provider health:", err);
+        setProviderHealthError(err.message || "Failed to load provider health.");
+      })
+      .finally(() => {
+        setProviderHealthLoading(false);
+      });
+  }, [isTenantsView, sourceCredentialStore.selectedId, targetCredentialStore.selectedId]);
+
+  useEffect(() => {
     deploymentInstancesRef.current = deploymentInstances;
   }, [deploymentInstances]);
 
@@ -516,14 +536,7 @@ export default function ThunderdeployPage() {
 
     const fetchJobConfig = async () => {
       try {
-        const response = await fetch(
-          `${TRIGGER_SERVICE_BASE_URL}/jobs/${encodeURIComponent(reuseJobKey)}`
-        );
-        if (!response.ok) {
-          const detail = await response.text().catch(() => "");
-          throw new Error(detail || `HTTP ${response.status}`);
-        }
-        const jobRecord = await response.json();
+        const jobRecord = await getJob(reuseJobKey);
         if (cancelled) {
           return;
         }
@@ -861,12 +874,12 @@ export default function ThunderdeployPage() {
                 return;
               }
 
-              const response = await fetch(`${TRIGGER_SERVICE_BASE_URL}/job_status/${instance.job_project_id}/${instance.job_region}/${instance.job_name}/${instance.job_execution_name}`);
-              if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: "Failed to fetch status, non-JSON response." }));
-                throw new Error(`Failed to fetch status for ${instance.id}: ${response.status} ${JSON.stringify(errorData)}`);
-              }
-              const statusData = await response.json();
+              const statusData = await getJobStatus(
+                instance.job_project_id,
+                instance.job_region,
+                instance.job_name,
+                instance.job_execution_name,
+              );
               const responseStatus = statusData.deployment_outcome || `job_${statusData.job_execution_status?.toLowerCase() || 'unknown'}`;
 
               let logResult = null;
@@ -1433,22 +1446,13 @@ export default function ThunderdeployPage() {
         : inst
     ));
 
-    const serviceAccountStr = JSON.stringify(globalServiceAccountFile);
-    const customerServiceAccountStr = JSON.stringify(globalCustomerServiceAccountFile);
-    const formData = new FormData();
-    formData.append("userrequirements.json", new Blob([finalJsonStr], { type: "application/json" }), "userrequirements.json");
-    formData.append("serviceaccount.json", new Blob([serviceAccountStr], { type: "application/json" }), "serviceaccount.json");
-    formData.append("customer_serviceaccount.json", new Blob([customerServiceAccountStr], { type: "application/json" }), "customer_serviceaccount.json");
-
     try {
-      const response = await fetch(`${TRIGGER_SERVICE_BASE_URL}/trigger`, {
-        method: "POST",
-        body: formData,
+      const userrequirements = JSON.parse(finalJsonStr);
+      const responseData = await triggerDeploy({
+        userrequirements,
+        serviceaccount: globalServiceAccountFile,
+        customer_serviceaccount: globalCustomerServiceAccountFile,
       });
-      const responseData = await response.json();
-      if (!response.ok) {
-        throw new Error(`Trigger service error! status: ${response.status}. Response: ${JSON.stringify(responseData)}`);
-      }
 
       if (responseData.results && Array.isArray(responseData.results)) {
         setDeploymentInstances(prevInstances =>
@@ -1609,12 +1613,12 @@ export default function ThunderdeployPage() {
     ));
 
     try {
-      const response = await fetch(`${TRIGGER_SERVICE_BASE_URL}/job_status/${instance.job_project_id}/${instance.job_region}/${instance.job_name}/${instance.job_execution_name}`);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: "Failed to fetch status, non-JSON response." }));
-        throw new Error(`Failed to fetch status for ${instance.id}: ${response.status} ${JSON.stringify(errorData)}`);
-      }
-      const statusData = await response.json();
+      const statusData = await getJobStatus(
+        instance.job_project_id,
+        instance.job_region,
+        instance.job_name,
+        instance.job_execution_name,
+      );
       const responseStatus = statusData.deployment_outcome || `job_${statusData.job_execution_status?.toLowerCase() || 'unknown'}`;
 
       let logResult = null;
@@ -1729,6 +1733,55 @@ export default function ThunderdeployPage() {
     setSnackbarOpen(true);
   };
 
+  const renderProviderHealthAlert = () => {
+    if (providerHealthLoading) {
+      return <Alert severity="info">Checking provider setup…</Alert>;
+    }
+    if (providerHealthError) {
+      return <Alert severity="warning">{providerHealthError}</Alert>;
+    }
+    if (!providerHealth) {
+      return null;
+    }
+
+    const status = providerHealth.overall_status || "warning";
+    const triggerservice = providerHealth.triggerservice || {};
+    const source = providerHealth.source_credential || {};
+    const target = providerHealth.target_credential || {};
+
+    const blockingReasons = [];
+    const warningReasons = [];
+
+    if (!triggerservice.configured) {
+      blockingReasons.push("TriggerService not configured");
+    } else if (!triggerservice.reachable) {
+      blockingReasons.push("TriggerService unreachable");
+    }
+    if (!source.selectedId) {
+      blockingReasons.push("No source credential selected");
+    } else if (!["primed", "verified"].includes((source.status || "").toLowerCase())) {
+      warningReasons.push(`Source credential status: ${source.status || "unknown"}`);
+    }
+    if (!target.selectedId) {
+      warningReasons.push("No target credential selected");
+    } else if ((target.status || "").toLowerCase() !== "primed") {
+      warningReasons.push(`Target credential status: ${target.status || "unknown"} (needs primed)`);
+    }
+
+    const severity = status === "error" ? "error" : status === "warning" ? "warning" : "success";
+    const blockingText = blockingReasons.join("; ") || triggerservice.detail || "Unknown issue.";
+    const warningText = [...blockingReasons, ...warningReasons].filter(Boolean).join("; ") || "Review provider setup.";
+    const successText = `Provider setup looks good. TriggerService reachable; source ${source.selectedId || "n/a"}; target ${target.selectedId || "n/a"}.`;
+
+    if (severity === "success") {
+      return <Alert severity="success">{successText}</Alert>;
+    }
+    if (severity === "warning") {
+      return <Alert severity="warning">Provider setup has warnings: {warningText}</Alert>;
+    }
+    return <Alert severity="error">Provider setup is blocking tenant provisioning: {blockingText}</Alert>;
+  };
+
 
   const headerActions = (
     <>
@@ -1832,7 +1885,14 @@ export default function ThunderdeployPage() {
           </Box>
 
           {isTenantsView ? (
-            <TenantProvisioningForm serviceAccount={globalServiceAccountFile} customerServiceAccount={globalCustomerServiceAccountFile} />
+            <Stack spacing={2}>
+              {renderProviderHealthAlert()}
+              <TenantProvisioningForm
+                serviceAccount={globalServiceAccountFile}
+                customerServiceAccount={globalCustomerServiceAccountFile}
+                providerHealth={providerHealth}
+              />
+            </Stack>
           ) : (
             <>
               <Paper variant="outlined" sx={{ p: 2 }}>

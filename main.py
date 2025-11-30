@@ -18,6 +18,7 @@ from uuid import uuid4
 
 from google.api_core import exceptions as gcs_exceptions
 from google.cloud import storage
+from tenant_stack_template import get_tenant_stack_template, list_tenant_stack_templates
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("unified-ui")
@@ -999,6 +1000,32 @@ async def deploy_sample_userrequirements(request: Request) -> JSONResponse:
     raise HTTPException(status_code=404, detail=f"Sample userrequirements not found. Tried: {[str(p) for p in candidate_paths]}")
 
 
+@app.get("/api/tenant-stack/template")
+async def tenant_stack_template() -> JSONResponse:
+    """
+    Return the sanitized default tenant stack template (10-agent wiring).
+    """
+    try:
+        template = get_tenant_stack_template()
+    except Exception as exc:
+        logger.exception("Failed to load tenant stack template: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to load tenant stack template: {exc}")
+    return JSONResponse(template)
+
+
+@app.get("/api/tenant-stack/templates")
+async def tenant_stack_templates() -> JSONResponse:
+    """
+    List available tenant stack templates (summary only).
+    """
+    try:
+        templates = list_tenant_stack_templates(summary_only=True)
+    except Exception as exc:
+        logger.exception("Failed to list tenant stack templates: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to list tenant stack templates: {exc}")
+    return JSONResponse({"templates": templates})
+
+
 @app.get("/api/agent-catalog")
 async def agent_catalog(request: Request) -> JSONResponse:
     """
@@ -1412,6 +1439,102 @@ async def trigger_deploy(request: Request) -> JSONResponse:
         endpoint="/trigger",
         files=files,
     )
+
+
+@app.get("/api/trigger/job_status/{job_project_id}/{job_region}/{job_name}/{execution_name}")
+async def trigger_job_status(
+    job_project_id: str,
+    job_region: str,
+    job_name: str,
+    execution_name: str,
+    request: Request,
+) -> JSONResponse:
+    """
+    Proxy to TriggerService /job_status/<job_project_id>/<job_region>/<job_name>/<execution_name>.
+    """
+    return await _proxy_trigger_request(
+        request,
+        method="GET",
+        endpoint=f"/job_status/{job_project_id}/{job_region}/{job_name}/{execution_name}",
+        params=dict(request.query_params),
+    )
+
+
+@app.get("/api/provider/health")
+async def provider_health(request: Request) -> JSONResponse:
+    """
+    Lightweight provider health check used by the tenant provisioning UI.
+    Reports TriggerService reachability and selected credential presence/status.
+    """
+    triggerservice = {
+        "configured": bool(TRIGGERSERVICE_BASE_URL),
+        "reachable": False,
+        "detail": "",
+    }
+
+    if not TRIGGERSERVICE_BASE_URL:
+        triggerservice["detail"] = "TriggerService base URL not configured."
+    else:
+        url = f"{TRIGGERSERVICE_BASE_URL.rstrip('/')}/tenants"
+        headers = _with_forward_headers(request)
+        try:
+            async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+                resp = await client.get(url, headers=headers)
+            if resp.is_error:
+                try:
+                    payload = resp.json()
+                    detail = payload.get("detail") if isinstance(payload, dict) else payload
+                except Exception:
+                    detail = resp.text
+                triggerservice["reachable"] = False
+                triggerservice["detail"] = detail or f"HTTP {resp.status_code}"
+            else:
+                triggerservice["reachable"] = True
+                triggerservice["detail"] = "ok"
+        except Exception as exc:
+            logger.warning("Provider health TriggerService probe failed: %s", exc)
+            triggerservice["detail"] = str(exc)
+
+    def _credential_health(type_name: str) -> Dict[str, Any]:
+        try:
+            store = _load_store(type_name)
+        except Exception as exc:
+            logger.warning("Failed to load %s credential store for health: %s", type_name, exc)
+            return {"present": False, "selectedId": None, "status": None, "projectId": None}
+        entries = store.get("entries") or {}
+        selected_id = store.get("selectedId")
+        entry = entries.get(selected_id) if selected_id else None
+        return {
+            "present": bool(entries),
+            "selectedId": selected_id,
+            "status": entry.get("status") if entry else None,
+            "projectId": entry.get("projectId") if entry else None,
+        }
+
+    source_credential = _credential_health("source")
+    target_credential = _credential_health("target")
+
+    selected_source = bool(source_credential.get("selectedId"))
+    source_status = (source_credential.get("status") or "").lower()
+    target_status = (target_credential.get("status") or "").lower()
+
+    source_ready = source_status in {"primed", "verified"}
+    target_selected = bool(target_credential.get("selectedId"))
+    target_ready = target_status == "primed"
+
+    overall_status = "ok"
+    if (not triggerservice["configured"]) or (not triggerservice["reachable"]) or (not selected_source):
+        overall_status = "error"
+    elif (not source_ready) or (not target_selected) or (not target_ready):
+        overall_status = "warning"
+
+    payload = {
+        "triggerservice": triggerservice,
+        "source_credential": source_credential,
+        "target_credential": target_credential,
+        "overall_status": overall_status,
+    }
+    return JSONResponse(payload)
 
 
 @app.get("/api/health/summary")
