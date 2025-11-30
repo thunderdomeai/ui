@@ -19,19 +19,29 @@ import {
   Select,
   MenuItem,
   Chip,
+  Tooltip,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
-import CheckIcon from "@mui/icons-material/Check";
 import SectionCard from "../components/SectionCard.jsx";
 import { useServerCredentialStore } from "../hooks/useServerCredentialStore.js";
-import { primeCustomer, getPrimeStatus } from "../utils/api.js";
+import { primeCustomer, getPrimeStatus, verifyCredentialEntry, markCredentialPrimed } from "../utils/api.js";
 import PrimeResultsTable from "../components/PrimeResultsTable.jsx";
+
+const STATUS_META = {
+  unverified: { label: "Unverified", color: "default" },
+  verified: { label: "Verified", color: "warning" },
+  primed: { label: "Primed", color: "success" },
+};
+
+function StatusChip({ status }) {
+  const meta = STATUS_META[status] || STATUS_META.unverified;
+  return <Chip size="small" color={meta.color} label={meta.label} />;
+}
 
 export default function CredentialsPage() {
   const [tab, setTab] = useState("target");
   const sourceStore = useServerCredentialStore("source");
   const targetStore = useServerCredentialStore("target");
-
   const store = tab === "source" ? sourceStore : targetStore;
 
   const [label, setLabel] = useState("");
@@ -39,25 +49,54 @@ export default function CredentialsPage() {
   const [projectId, setProjectId] = useState("");
   const [region, setRegion] = useState("us-central1");
   const [primeResult, setPrimeResult] = useState(null);
+  const [verifyResult, setVerifyResult] = useState(null);
   const [statusMsg, setStatusMsg] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [focusEntryId, setFocusEntryId] = useState("");
 
-  const activeSourceLabel = useMemo(() => sourceStore.activeEntry?.label || "None", [sourceStore.activeEntry]);
-  const activeTargetLabel = useMemo(() => targetStore.activeEntry?.label || "None", [targetStore.activeEntry]);
+  const activeSource = sourceStore.activeEntry;
+  const activeTarget = targetStore.activeEntry;
+
+  const workingEntry = useMemo(
+    () => store.entries.find((e) => e.id === focusEntryId) || null,
+    [store.entries, focusEntryId]
+  );
+  const workingStatus = workingEntry?.status || "unverified";
+  const workingProjectId = projectId || workingEntry?.projectId || workingEntry?.credential?.project_id || "";
+  const uniqueProjects = useMemo(() => {
+    const items = store.entries
+      .map((e) => e?.projectId || e?.credential?.project_id)
+      .filter(Boolean);
+    return [...new Set(items)];
+  }, [store.entries]);
 
   useEffect(() => {
-    if (targetStore.activeEntry?.credential?.project_id) {
-      setProjectId(targetStore.activeEntry.credential.project_id);
+    if (!store.entries.length) {
+      setFocusEntryId("");
+      return;
     }
-  }, [targetStore.activeEntry]);
+    if (!focusEntryId || !store.entries.find((e) => e.id === focusEntryId)) {
+      setFocusEntryId(store.entries[0].id);
+    }
+  }, [store.entries, focusEntryId, tab]);
+
+  useEffect(() => {
+    const entry = store.entries.find((e) => e.id === focusEntryId);
+    if (entry?.projectId) {
+      setProjectId(entry.projectId);
+    }
+  }, [focusEntryId, store.entries]);
 
   const addCredential = async () => {
     try {
       const parsed = JSON.parse(jsonText);
-      await store.addEntry({ label, credential: parsed });
+      const saved = await store.addEntry({ label, credential: parsed });
       setLabel("");
       setJsonText("");
+      if (saved?.id) {
+        setFocusEntryId(saved.id);
+      }
     } catch (e) {
       setError(e.message || "Invalid JSON");
     }
@@ -68,7 +107,7 @@ export default function CredentialsPage() {
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text);
+      JSON.parse(text); // validate early
       setJsonText(text);
       if (!label) {
         const baseName = file.name.replace(/\.[^.]+$/, "");
@@ -80,18 +119,67 @@ export default function CredentialsPage() {
     }
   };
 
-  const handlePrime = async () => {
-    if (!targetStore.activeEntry?.credential) {
-      setError("Select an active target credential first.");
+  const handleVerify = async () => {
+    if (!workingEntry) {
+      setError("Select a credential to verify.");
+      return;
+    }
+    if (!workingProjectId) {
+      setError("Project ID is required to verify.");
+      return;
+    }
+    if (!workingEntry.credential) {
+      setError("Selected credential JSON is missing.");
       return;
     }
     setLoading(true);
     setError("");
     setStatusMsg("");
     try {
+      setPrimeResult(null);
+      const data = await verifyCredentialEntry(tab, workingEntry.id, {
+        project_id: workingProjectId,
+        region,
+      });
+      setVerifyResult(data.prime_status || null);
+      setStatusMsg("Credential verified. You can prime next.");
+      await store.reload();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrime = async () => {
+    if (tab !== "target") {
+      setError("Priming applies to customer/target accounts.");
+      return;
+    }
+    if (!workingEntry) {
+      setError("Select a credential to prime.");
+      return;
+    }
+    if (!workingProjectId) {
+      setError("Project ID is required to prime.");
+      return;
+    }
+    if (!workingEntry.credential) {
+      setError("Selected credential JSON is missing.");
+      return;
+    }
+    if (workingStatus !== "verified" && workingStatus !== "primed") {
+      setError("Run readiness verification before priming.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    setStatusMsg("");
+    try {
+      setVerifyResult(null);
       const payload = {
-        service_account: targetStore.activeEntry.credential,
-        project_id: projectId || targetStore.activeEntry.credential.project_id,
+        service_account: workingEntry.credential,
+        project_id: workingProjectId,
         region,
         include_defaults: true,
         extra_buckets: [],
@@ -99,6 +187,8 @@ export default function CredentialsPage() {
       const data = await primeCustomer(payload);
       setPrimeResult(data);
       setStatusMsg(data.has_errors ? "Primed with warnings." : "Primed successfully.");
+      await markCredentialPrimed(tab, workingEntry.id, { prime_result: data });
+      await store.reload();
     } catch (e) {
       setError(e.message);
     } finally {
@@ -107,18 +197,27 @@ export default function CredentialsPage() {
   };
 
   const handleCheck = async () => {
-    if (!targetStore.activeEntry?.credential) {
-      setError("Select an active target credential first.");
+    if (!workingEntry) {
+      setError("Select a credential to check.");
+      return;
+    }
+    if (!workingProjectId) {
+      setError("Project ID is required to check status.");
+      return;
+    }
+    if (!workingEntry.credential) {
+      setError("Selected credential JSON is missing.");
       return;
     }
     setLoading(true);
     setError("");
     setStatusMsg("");
     try {
-      const credentialB64 = btoa(JSON.stringify(targetStore.activeEntry.credential));
+      setVerifyResult(null);
+      const credentialB64 = btoa(JSON.stringify(workingEntry.credential));
       const data = await getPrimeStatus({
         credentialB64,
-        projectId: projectId || targetStore.activeEntry.credential.project_id,
+        projectId: workingProjectId,
         region,
       });
       setPrimeResult(data);
@@ -130,24 +229,41 @@ export default function CredentialsPage() {
     }
   };
 
+  const statusSummary = (entry) => {
+    if (!entry) return "None";
+    const meta = STATUS_META[entry.status] || STATUS_META.unverified;
+    return `${entry.label} (${meta.label})`;
+  };
+
   return (
     <Box>
       <Typography variant="h4" fontWeight={700} gutterBottom>
-        Credentials & Priming
+        Credentials, Verification, and Priming
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Persist source/target credentials in the shared bucket and run priming (buckets, service accounts, queues, scheduler jobs) via TriggerService.
+        Upload source/target service accounts, verify permissions, prime the customer project, then activate the primed credentials for deploys and monitoring.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
           <span>Active source:</span>
-          <Chip label={activeSourceLabel} color={sourceStore.activeEntry ? "success" : "default"} size="small" />
+          <Chip
+            label={statusSummary(activeSource)}
+            color={activeSource?.status === "primed" ? "success" : "default"}
+            size="small"
+          />
           <span>Active target:</span>
-          <Chip label={activeTargetLabel} color={targetStore.activeEntry ? "success" : "default"} size="small" />
+          <Chip
+            label={statusSummary(activeTarget)}
+            color={activeTarget?.status === "primed" ? "success" : "default"}
+            size="small"
+          />
+          <Typography variant="body2" color="text.secondary">
+            Only primed credentials can be activated and used on deploy/monitor pages.
+          </Typography>
         </Stack>
       </Alert>
 
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
+      <Box sx={{ borderBottom: 1, borderColor: "divider", mb: 2 }}>
         <Tabs value={tab} onChange={(e, newValue) => setTab(newValue)}>
           <Tab label="Target Credentials (Customer)" value="target" />
           <Tab label="Source Credentials (Deployer)" value="source" />
@@ -158,7 +274,7 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={5}>
           <SectionCard
             title={`Add ${tab} credential`}
-            subtitle={`Stored in the shared credential bucket for ${tab}.`}
+            subtitle={`Stored in the shared credential bucket for ${tab}. Verify -> prime -> activate.`}
           >
             <Stack spacing={1.5}>
               <Button variant="outlined" component="label">
@@ -181,30 +297,50 @@ export default function CredentialsPage() {
           </SectionCard>
           <SectionCard
             title={`Stored ${tab} credentials`}
-            subtitle={`Select active ${tab} for priming/deploying.`}
+            subtitle="Verify, prime, then activate primed entries."
           >
             <List dense>
-              {store.entries.map((entry) => (
-                <ListItem
-                  key={entry.id}
-                  secondaryAction={
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      {store.selectedId === entry.id ? (
-                        <Chip size="small" color="success" label="Active" />
-                      ) : (
-                        <Button size="small" variant="outlined" onClick={() => store.selectEntry(entry.id)}>
-                          Activate
+              {store.entries.map((entry) => {
+                const isActive = store.selectedId === entry.id;
+                const isPrimed = entry.status === "primed";
+                return (
+                  <ListItem
+                    key={entry.id}
+                    secondaryAction={
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <StatusChip status={entry.status} />
+                        <Button size="small" variant="text" onClick={() => setFocusEntryId(entry.id)}>
+                          Ready check
                         </Button>
-                      )}
-                      <IconButton edge="end" aria-label="delete" onClick={() => store.removeEntry(entry.id)}>
-                        <DeleteIcon />
-                      </IconButton>
-                    </Stack>
-                  }
-                >
-                  <ListItemText primary={entry.label} secondary={entry.id} />
-                </ListItem>
-              ))}
+                        {isActive ? (
+                          <Chip size="small" color="success" label="Active" />
+                        ) : (
+                          <Tooltip title={isPrimed ? "Activate this primed credential." : "Prime before activation."}>
+                            <span>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                disabled={!isPrimed}
+                                onClick={() => store.selectEntry(entry.id)}
+                              >
+                                Activate
+                              </Button>
+                            </span>
+                          </Tooltip>
+                        )}
+                        <IconButton edge="end" aria-label="delete" onClick={() => store.removeEntry(entry.id)}>
+                          <DeleteIcon />
+                        </IconButton>
+                      </Stack>
+                    }
+                  >
+                    <ListItemText
+                      primary={entry.label}
+                      secondary={entry.projectId ? `Project: ${entry.projectId}` : entry.id}
+                    />
+                  </ListItem>
+                );
+              })}
               {store.entries.length === 0 ? (
                 <ListItem>
                   <ListItemText primary="No credentials saved." />
@@ -214,46 +350,101 @@ export default function CredentialsPage() {
           </SectionCard>
         </Grid>
         <Grid item xs={12} md={7}>
-          <SectionCard title="Prime project" subtitle="Creates buckets, service accounts, task queues, scheduler jobs.">
+          <SectionCard
+            title="Readiness + priming"
+            subtitle="Step 1: verify permissions. Step 2: prime (target only). Step 3: activate."
+          >
             <Stack spacing={1.5}>
+              <FormControl fullWidth>
+                <InputLabel id="entry-select-label">Credential to verify</InputLabel>
+                <Select
+                  labelId="entry-select-label"
+                  value={focusEntryId}
+                  label="Credential to verify"
+                  onChange={(e) => setFocusEntryId(e.target.value)}
+                  disabled={!store.entries.length}
+                >
+                  {store.entries.map((entry) => (
+                    <MenuItem key={entry.id} value={entry.id}>
+                      {entry.label} ({STATUS_META[entry.status]?.label || "Unverified"})
+                    </MenuItem>
+                  ))}
+                  {!store.entries.length ? (
+                    <MenuItem value="">
+                      <em>Add a credential to begin</em>
+                    </MenuItem>
+                  ) : null}
+                </Select>
+              </FormControl>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" color="text.secondary">
+                  Status:
+                </Typography>
+                <StatusChip status={workingStatus} />
+                {workingEntry?.verifiedAt ? (
+                  <Chip
+                    size="small"
+                    label={`Verified at ${new Date(workingEntry.verifiedAt).toLocaleString()}`}
+                    color="default"
+                  />
+                ) : null}
+                {workingEntry?.primedAt ? (
+                  <Chip
+                    size="small"
+                    label={`Primed at ${new Date(workingEntry.primedAt).toLocaleString()}`}
+                    color="success"
+                    variant="outlined"
+                  />
+                ) : null}
+              </Stack>
+
               <FormControl fullWidth>
                 <InputLabel id="project-select-label">Project ID</InputLabel>
                 <Select
                   labelId="project-select-label"
-                  value={projectId || targetStore.activeEntry?.credential?.project_id || ""}
+                  value={workingProjectId}
                   label="Project ID"
                   onChange={(e) => setProjectId(e.target.value)}
-                  disabled={!targetStore.entries.length}
+                  disabled={!store.entries.length}
                 >
-                  {targetStore.entries
-                    .map((entry) => entry?.credential?.project_id)
-                    .filter(Boolean)
-                    .filter((value, index, arr) => arr.indexOf(value) === index)
-                    .map((pid) => (
-                      <MenuItem key={pid} value={pid}>
-                        {pid}
-                      </MenuItem>
-                    ))}
-                  {!targetStore.entries.length ? (
+                  {uniqueProjects.map((pid) => (
+                    <MenuItem key={pid} value={pid}>
+                      {pid}
+                    </MenuItem>
+                  ))}
+                  {uniqueProjects.length === 0 ? (
                     <MenuItem value="">
-                      <em>Add a target credential to auto-fill project</em>
+                      <em>Add a credential to auto-fill project</em>
                     </MenuItem>
                   ) : null}
                 </Select>
               </FormControl>
               <TextField label="Region" value={region} onChange={(e) => setRegion(e.target.value)} />
-              <Stack direction="row" spacing={1}>
-                <Button variant="contained" onClick={handlePrime} disabled={loading}>
-                  Run priming
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                <Button variant="outlined" onClick={handleVerify} disabled={loading || !workingEntry}>
+                  Run readiness check
                 </Button>
-                <Button variant="outlined" onClick={handleCheck} disabled={loading}>
+                <Button variant="outlined" onClick={handleCheck} disabled={loading || !workingEntry}>
                   Check status
                 </Button>
+                <Tooltip title={tab === "target" ? "" : "Priming only applies to target/customer credentials."}>
+                  <span>
+                    <Button
+                      variant="contained"
+                      onClick={handlePrime}
+                      disabled={loading || tab !== "target" || !workingEntry || workingStatus === "unverified"}
+                    >
+                      Prime project
+                    </Button>
+                  </span>
+                </Tooltip>
               </Stack>
+
               {statusMsg ? <Alert severity="info">{statusMsg}</Alert> : null}
               {error ? <Alert severity="error">{error}</Alert> : null}
               <Divider />
-              <PrimeResultsTable result={primeResult} />
+              <PrimeResultsTable result={primeResult || verifyResult} />
             </Stack>
           </SectionCard>
         </Grid>

@@ -45,6 +45,7 @@ import {
 } from "../utils/api.js";
 import LogsViewer from "../components/LogsViewer.jsx";
 import { useServerCredentialStore } from "../hooks/useServerCredentialStore.js";
+import { useCredentialStoreBridge } from "../hooks/credentials/useCredentialStores.js";
 
 const POLL_INTERVAL = 15000;
 
@@ -78,6 +79,8 @@ export default function DashboardPage() {
   const [reuseStatus, setReuseStatus] = useState("");
   const [reuseError, setReuseError] = useState("");
   const targetStore = useServerCredentialStore("target");
+  const credentialBridge = useCredentialStoreBridge();
+  const readyForMonitoring = credentialBridge.hasAllActive;
 
   const fetchTenants = useCallback(async () => {
     try {
@@ -205,6 +208,11 @@ export default function DashboardPage() {
       <Typography variant="body1" color="text.secondary" gutterBottom>
         Multi-tenant job view powered by TriggerService. Monitor jobs, inspect details, and manage service revisions.
       </Typography>
+      {!readyForMonitoring ? (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Activate primed source and target credentials on the Credentials page before using dashboard or logs.
+        </Alert>
+      ) : null}
 
       <SectionCard
         title="Filters"

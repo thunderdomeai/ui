@@ -37,6 +37,7 @@ export default function PrimingPage() {
   const [statusMsg, setStatusMsg] = useState("");
   const [error, setError] = useState("");
   const activeCred = store.activeEntry?.credential;
+  const primedEntries = useMemo(() => store.entries.filter((e) => e.status === "primed"), [store.entries]);
 
   const handleChange = (field) => (event) => {
     const value = field === "seed" ? event.target.checked : event.target.value;
@@ -138,12 +139,15 @@ export default function PrimingPage() {
                 onChange={(e) => store.selectEntry(e.target.value || null)}
               >
                 <option value="">—</option>
-                {store.entries.map((entry) => (
+                {primedEntries.map((entry) => (
                   <option key={entry.id} value={entry.id}>
                     {entry.label}
                   </option>
                 ))}
               </TextField>
+              {primedEntries.length === 0 ? (
+                <Alert severity="info">Prime a credential on the Credentials page before activating it here.</Alert>
+              ) : null}
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField label="Project ID" value={form.projectId} onChange={handleChange("projectId")} fullWidth />
                 <TextField label="Region" value={form.region} onChange={handleChange("region")} fullWidth />

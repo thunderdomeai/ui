@@ -82,9 +82,6 @@ READ_TIMEOUT_MESSAGE = (
 REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
 
 # --- Simple server-side credential store ---
-VALID_CREDENTIAL_TYPES = {"source", "target"}
-DATA_DIR = Path(os.getenv("CREDENTIALS_DIR", "/tmp/unified-ui-credentials"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
 _gcs_bucket = None
 
 
@@ -255,6 +252,7 @@ async def root() -> HTMLResponse:
 
 # --- Simple server-side credential store ---
 VALID_CREDENTIAL_TYPES = {"source", "target"}
+VALID_ENTRY_STATUSES = {"unverified", "verified", "primed"}
 DATA_DIR = Path(os.getenv("CREDENTIALS_DIR", "/tmp/unified-ui-credentials"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -273,6 +271,35 @@ def _empty_store() -> Dict[str, Any]:
     return {"selectedId": None, "entries": {}}
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalize_entry(entry: Any) -> Dict[str, Any]:
+    if not isinstance(entry, dict):
+        return {
+            "credential": None,
+            "label": None,
+            "createdAt": None,
+            "status": "unverified",
+        }
+    status = entry.get("status") or "unverified"
+    if status not in VALID_ENTRY_STATUSES:
+        status = "unverified"
+    normalized = {
+        "credential": entry.get("credential"),
+        "label": entry.get("label"),
+        "createdAt": entry.get("createdAt") or entry.get("created_at") or None,
+        "status": status,
+        "projectId": entry.get("projectId") or entry.get("project_id"),
+        "verifiedAt": entry.get("verifiedAt") or entry.get("verified_at"),
+        "primedAt": entry.get("primedAt") or entry.get("primed_at"),
+        "lastCheck": entry.get("lastCheck") or entry.get("last_check"),
+        "lastPrimeResult": entry.get("lastPrimeResult") or entry.get("last_prime_result"),
+    }
+    return normalized
+
+
 def _normalize_type(type_name: str) -> str:
     if type_name not in VALID_CREDENTIAL_TYPES:
         raise HTTPException(status_code=400, detail="Unsupported credential type.")
@@ -284,9 +311,16 @@ def _normalize_store_payload(raw: Any) -> Dict[str, Any]:
         return _empty_store()
     store = _empty_store()
     store["selectedId"] = raw.get("selectedId")
-    store["entries"] = raw.get("entries", {})
-    if store["selectedId"] and store["selectedId"] not in store["entries"]:
-        store["selectedId"] = None
+    entries = raw.get("entries", {})
+    normalized_entries: Dict[str, Any] = {}
+    for entry_id, entry_value in entries.items():
+        normalized_entries[entry_id] = _normalize_entry(entry_value)
+    store["entries"] = normalized_entries
+
+    if store["selectedId"]:
+        entry = store["entries"].get(store["selectedId"])
+        if not entry or entry.get("status") != "primed":
+            store["selectedId"] = None
     return store
 
 
@@ -384,12 +418,16 @@ async def credential_store_add(type_name: str, request: Request) -> JSONResponse
         entry_id = uuid4().hex
 
     store = _load_store(t)
+    created_at = body.get("createdAt") or _now_iso()
     store["entries"][entry_id] = {
         "credential": credential,
         "label": label or entry_id,
-        "createdAt": body.get("createdAt") or None,
+        "createdAt": created_at,
+        "status": "unverified",
+        "projectId": credential.get("project_id"),
     }
-    store["selectedId"] = entry_id
+    # Do not auto-activate new credentials; they must be verified + primed first.
+    store["selectedId"] = store.get("selectedId") if store.get("selectedId") in store["entries"] else None
     _write_store(t, store)
     return JSONResponse({"id": entry_id, **store["entries"][entry_id], "selectedId": store["selectedId"]}, status_code=201)
 
@@ -405,6 +443,10 @@ async def credential_store_select(type_name: str, request: Request) -> JSONRespo
     store = _load_store(t)
     if selected_id is not None and selected_id not in store["entries"]:
         raise HTTPException(status_code=404, detail="Credential not found")
+    if selected_id:
+        entry = store["entries"].get(selected_id)
+        if not entry or entry.get("status") != "primed":
+            raise HTTPException(status_code=400, detail="Credential must be primed before activation.")
     store["selectedId"] = selected_id
     _write_store(t, store)
     return JSONResponse({}, status_code=204)
@@ -421,6 +463,94 @@ async def credential_store_delete(type_name: str, entry_id: str) -> JSONResponse
         store["selectedId"] = None
     _write_store(t, store)
     return JSONResponse(store)
+
+
+async def _prime_status_for_credential(
+    credential: Dict[str, Any],
+    project_id: Optional[str],
+    region: Optional[str],
+    request: Request,
+) -> Dict[str, Any]:
+    if not TRIGGERSERVICE_BASE_URL:
+        raise HTTPException(status_code=500, detail="TriggerService is not configured.")
+    try:
+        credential_b64 = base64.b64encode(json.dumps(credential).encode("utf-8")).decode("utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to encode credential: {exc}")
+
+    params: Dict[str, Any] = {"credential": credential_b64}
+    if project_id:
+        params["project_id"] = project_id
+    if region:
+        params["region"] = region
+
+    url = f"{TRIGGERSERVICE_BASE_URL.rstrip('/')}/prime-status"
+    headers = _with_forward_headers(request)
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        resp = await client.get(url, params=params, headers=headers)
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    if resp.is_error or payload is None:
+        raise HTTPException(status_code=resp.status_code, detail=payload or resp.text)
+    return payload
+
+
+@app.post("/api/credential-store/{type_name}/entries/{entry_id}/verify")
+async def credential_store_verify(type_name: str, entry_id: str, request: Request) -> JSONResponse:
+    t = _normalize_type(type_name)
+    store = _load_store(t)
+    entry = store["entries"].get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    credential = entry.get("credential")
+    if not isinstance(credential, dict):
+        raise HTTPException(status_code=400, detail="Stored credential is invalid.")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    project_id = body.get("project_id") or body.get("projectId") or entry.get("projectId") or credential.get("project_id")
+    region = body.get("region") or "us-central1"
+
+    status_payload = await _prime_status_for_credential(credential, project_id, region, request)
+
+    entry["status"] = "primed" if entry.get("status") == "primed" else "verified"
+    entry["verifiedAt"] = _now_iso()
+    entry["projectId"] = project_id
+    entry["lastCheck"] = {
+        "status": status_payload.get("status"),
+        "missing_bucket_count": status_payload.get("missing_bucket_count"),
+        "missing_service_account_count": status_payload.get("missing_service_account_count"),
+    }
+    store["entries"][entry_id] = entry
+    _write_store(t, store)
+    return JSONResponse({"entry": entry, "prime_status": status_payload})
+
+
+@app.post("/api/credential-store/{type_name}/entries/{entry_id}/mark-primed")
+async def credential_store_mark_primed(type_name: str, entry_id: str, request: Request) -> JSONResponse:
+    t = _normalize_type(type_name)
+    store = _load_store(t)
+    entry = store["entries"].get(entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    if entry.get("status") not in {"verified", "primed"}:
+        raise HTTPException(status_code=400, detail="Verify the credential before marking it primed.")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    entry["status"] = "primed"
+    entry["primedAt"] = _now_iso()
+    if body.get("prime_result"):
+        entry["lastPrimeResult"] = body.get("prime_result")
+    store["entries"][entry_id] = entry
+    _write_store(t, store)
+    return JSONResponse({"entry": entry})
 
 
 # --- Deploy configuration store (simple JSON persisted on disk) ---

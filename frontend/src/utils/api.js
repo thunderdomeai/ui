@@ -39,6 +39,20 @@ export async function primeCustomer(payload) {
   });
 }
 
+export async function verifyCredentialEntry(type, entryId, payload = {}) {
+  return fetchJson(`/api/credential-store/${type}/entries/${encodeURIComponent(entryId)}/verify`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function markCredentialPrimed(type, entryId, payload = {}) {
+  return fetchJson(`/api/credential-store/${type}/entries/${encodeURIComponent(entryId)}/mark-primed`, {
+    method: "POST",
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export async function listJobs(params = {}) {
   const search = new URLSearchParams();
   Object.entries(params || {}).forEach(([k, v]) => {

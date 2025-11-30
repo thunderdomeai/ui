@@ -80,6 +80,16 @@ Credential persistence (GCS)
 - If the bucket does not exist and the runtime has permission, the service will auto-create it (location controlled by `CREDENTIALS_BUCKET_LOCATION`, default `US`).
 - Local development: if `CREDENTIALS_BUCKET` is unset, the store uses `/tmp/unified-ui-credentials` and will disappear on restart.
 
+Credential readiness workflow
+-----------------------------
+- Statuses: `unverified` (fresh upload) → `verified` (passes readiness/prime-status check) → `primed` (post-priming). Only `primed` credentials can be activated.
+- Flow when a customer says “ready”: Credentials → pick the credential → **Run readiness check** (verifies permissions via `prime-status`) → **Prime project** (target/customer only) → **Activate**. Deploy, dashboards, and logs require both source + target to be active & primed.
+- Source and target credential stores persist in the shared bucket; selection is blocked until an entry is primed to avoid mismatched projects.
+- Quick map:
+  ```
+  [Upload SA JSON] -> [Verify] -> [Prime target] -> [Activate] -> [Deploy / Monitor]
+  ```
+
 Service provider priming
 ------------------------
 - You can prime both customer and service provider projects from the Priming screen. Select or paste the provider service account JSON, project ID, and region, then run **Run priming** to create buckets, service accounts, queues, and scheduler jobs for the provider side (mirrors the customer priming flow).

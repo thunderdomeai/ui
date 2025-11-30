@@ -19,6 +19,12 @@ function mapStoreToEntries(store) {
     label: formatCredentialLabel(id, value),
     createdAt: value?.createdAt ?? null,
     credential: value?.credential ?? null,
+    status: value?.status || "unverified",
+    projectId: value?.projectId || value?.credential?.project_id || "",
+    verifiedAt: value?.verifiedAt,
+    primedAt: value?.primedAt,
+    lastCheck: value?.lastCheck,
+    lastPrimeResult: value?.lastPrimeResult,
   }));
 
   return sortEntries(entriesArray);
@@ -79,6 +85,12 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
         label: formatCredentialLabel(data.id, data),
         createdAt: data?.createdAt ?? null,
         credential: data?.credential ?? null,
+        status: data?.status || "unverified",
+        projectId: data?.projectId || data?.credential?.project_id || "",
+        verifiedAt: data?.verifiedAt,
+        primedAt: data?.primedAt,
+        lastCheck: data?.lastCheck,
+        lastPrimeResult: data?.lastPrimeResult,
       };
 
       setEntries((prev) => sortEntries([newEntry, ...prev.filter((entry) => entry.id !== newEntry.id)]));
@@ -109,6 +121,12 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
 
   const selectEntry = useCallback(
     async (entryId) => {
+      if (entryId) {
+        const entry = entries.find((e) => e.id === entryId);
+        if (entry && entry.status !== "primed") {
+          throw new Error("Only primed credentials can be activated.");
+        }
+      }
       const response = await fetch(`/api/credential-store/${type}/selection`, {
         method: "PUT",
         headers: {
@@ -124,7 +142,7 @@ export function useCredentialStore(type, { autoLoad = true } = {}) {
 
       setSelectedId(entryId ?? null);
     },
-    [type]
+    [type, entries]
   );
 
   return useMemo(

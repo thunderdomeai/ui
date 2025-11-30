@@ -18,6 +18,12 @@ export function useServerCredentialStore(type) {
         label: value.label || id,
         credential: value.credential,
         createdAt: value.createdAt,
+        status: value.status || "unverified",
+        projectId: value.projectId || value.credential?.project_id || "",
+        verifiedAt: value.verifiedAt,
+        primedAt: value.primedAt,
+        lastCheck: value.lastCheck,
+        lastPrimeResult: value.lastPrimeResult,
       }));
       setEntries(mapped);
       setSelectedId(data.selectedId || null);
@@ -45,13 +51,21 @@ export function useServerCredentialStore(type) {
         const detail = await res.text();
         throw new Error(detail || "Failed to add credential");
       }
+      const data = await res.json();
       await load();
+      return data;
     },
     [type, load]
   );
 
   const selectEntry = useCallback(
     async (id) => {
+      if (id) {
+        const entry = entries.find((e) => e.id === id);
+        if (entry && entry.status !== "primed") {
+          throw new Error("Only primed credentials can be activated.");
+        }
+      }
       const res = await fetch(`/api/credential-store/${type}/selection`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -63,7 +77,7 @@ export function useServerCredentialStore(type) {
       }
       setSelectedId(id);
     },
-    [type]
+    [type, entries]
   );
 
   const removeEntry = useCallback(

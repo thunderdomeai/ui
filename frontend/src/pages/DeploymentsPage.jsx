@@ -18,11 +18,13 @@ import {
   MenuItem,
   Checkbox,
   FormControlLabel,
+  Alert,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import AddIcon from "@mui/icons-material/Add";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SectionCard from "../components/SectionCard.jsx";
+import { useCredentialStoreBridge } from "../hooks/credentials/useCredentialStores.js";
 
 const defaultBranch = "main";
 const defaultGithubToken = import.meta.env.VITE_GITHUB_TOKEN || "";
@@ -395,6 +397,8 @@ export default function DeploymentsPage() {
   const [state, dispatch] = useReducer(deploymentReducer, initialState);
   const { loadEnv } = useEnvLoader(dispatch);
   const { fetchBranches } = useBranchFetcher(dispatch);
+  const credentialBridge = useCredentialStoreBridge();
+  const readyForDeployment = credentialBridge.hasAllActive;
 
   // Load sample data on mount
   useEffect(() => {
@@ -454,6 +458,11 @@ export default function DeploymentsPage() {
       <Typography variant="body2" color="text.secondary" gutterBottom>
         Organize agents into deployment waves
       </Typography>
+      {!readyForDeployment ? (
+        <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
+          Activate primed source and target credentials in the Credentials page before deploying.
+        </Alert>
+      ) : null}
 
       {/* Deployment Waves with Pills */}
       <SectionCard
