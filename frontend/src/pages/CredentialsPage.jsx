@@ -237,7 +237,7 @@ export default function CredentialsPage() {
         Credentials, Verification, and Priming
       </Typography>
       <Typography variant="body1" color="text.secondary" gutterBottom>
-        Upload source/target service accounts, verify permissions, prime the project (customer target or provider/source), then activate (verified sources or primed targets) for deploys and monitoring.
+        Upload source/target service accounts, verify permissions, prime the project (required for targets, recommended for new provider/source accounts), then activate (verified sources or primed targets) for deploys and monitoring.
       </Typography>
       <Alert severity="info" sx={{ mb: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "flex-start", sm: "center" }}>
@@ -254,7 +254,7 @@ export default function CredentialsPage() {
             size="small"
           />
           <Typography variant="body2" color="text.secondary">
-            Targets must be primed; sources can be activated once verified. Deploy/monitor pages require an active source + target.
+            Targets must be primed. Sources can activate when verified, but prime them when bootstrapping a new provider account. Deploy/monitor pages require an active source + target.
           </Typography>
         </Stack>
       </Alert>
@@ -348,7 +348,7 @@ export default function CredentialsPage() {
         <Grid item xs={12} md={7}>
           <SectionCard
             title="Readiness + priming"
-            subtitle="Step 1: verify permissions. Step 2: prime (target or provider). Step 3: activate (verified sources or primed targets)."
+            subtitle="Step 1: verify permissions. Step 2: prime (targets required, sources optional for provider bootstrap). Step 3: activate (verified sources or primed targets)."
           >
             <Stack spacing={1.5}>
               <FormControl fullWidth>
@@ -424,13 +424,25 @@ export default function CredentialsPage() {
                 <Button variant="outlined" onClick={handleCheck} disabled={loading || !workingEntry}>
                   Check status
                 </Button>
-                <Button
-                  variant="contained"
-                  onClick={handlePrime}
-                  disabled={loading || !workingEntry || workingStatus === "unverified"}
+                <Tooltip
+                  title={
+                    workingStatus === "unverified"
+                      ? "Run readiness first."
+                      : tab === "target"
+                        ? "Required for customer/target accounts."
+                        : "Optional but recommended when bootstrapping a new provider/source account."
+                  }
                 >
-                  Prime project
-                </Button>
+                  <span>
+                    <Button
+                      variant="contained"
+                      onClick={handlePrime}
+                      disabled={loading || !workingEntry || workingStatus === "unverified"}
+                    >
+                      Prime project
+                    </Button>
+                  </span>
+                </Tooltip>
               </Stack>
 
               {statusMsg ? <Alert severity="info">{statusMsg}</Alert> : null}
