@@ -38,6 +38,7 @@ declare -a SERVICES=(
   "cloudscheduler.googleapis.com"          # Cloud Scheduler API for job management
   "cloudresourcemanager.googleapis.com"    # Required for project IAM policy updates
   "iam.googleapis.com"                     # Manage service accounts/keys via IAM API
+  "serviceusage.googleapis.com"            # Allow enabling other APIs via Service Usage
 )
 
 echo "Enabling required services..."
@@ -95,6 +96,7 @@ declare -a ROLES=(
   "roles/monitoring.metricWriter"           # Create custom metrics (monitoring.metricDescriptors.create)
   "roles/cloudtasks.admin"                  # Manage Cloud Tasks queues and tasks
   "roles/cloudscheduler.admin"              # Manage Cloud Scheduler jobs
+  "roles/serviceusage.serviceUsageAdmin"    # Enable/disable required APIs during priming
 )
 
 # Grant each role to the service account at the project level
