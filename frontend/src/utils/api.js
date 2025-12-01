@@ -181,6 +181,21 @@ export async function listSqlDatabases(instanceName) {
   return fetchJson(`/api/sql/instances/${encodeURIComponent(instanceName)}/databases`);
 }
 
+export async function validateBucketName(scope, name) {
+  const params = new URLSearchParams();
+  if (scope) params.set("scope", scope);
+  if (name) params.set("name", name);
+  return fetchJson(`/api/validate/bucket-name?${params.toString()}`);
+}
+
+export async function validateSqlDatabase(instance, database, scope) {
+  const params = new URLSearchParams();
+  if (instance) params.set("instance", instance);
+  if (database) params.set("database", database);
+  if (scope) params.set("scope", scope);
+  return fetchJson(`/api/sql/validate-database?${params.toString()}`);
+}
+
 export async function bootstrapProvider(body = {}) {
   return fetchJson("/api/bootstrap/provider", {
     method: "POST",

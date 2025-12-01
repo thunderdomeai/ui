@@ -25,6 +25,7 @@ import {
   listSqlInstances,
   listSqlDatabases,
   finalizeTenantStack,
+  validateSqlDatabase,
 } from "../utils/api.js";
 
 const defaultGithubToken =
@@ -156,6 +157,7 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
   const [sqlDatabasesLoading, setSqlDatabasesLoading] = useState(false);
   const [sqlDatabasesError, setSqlDatabasesError] = useState("");
   const [selectedDatabaseName, setSelectedDatabaseName] = useState("");
+  const [dbValidation, setDbValidation] = useState({ status: null, message: "" });
   const credentialsMissing = !serviceAccount || !customerServiceAccount;
   const providerStatus = providerHealth?.overall_status || null;
   const providerBlocked = providerStatus === "error";
@@ -223,6 +225,35 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       setSqlDatabasesLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!selectedInstanceName || !selectedDatabaseName) {
+      setDbValidation({ status: null, message: "" });
+      return;
+    }
+    const existing = sqlDatabases.find((db) => db.name === selectedDatabaseName);
+    if (existing) {
+      setDbValidation({ status: "exists", message: `Using existing database ${selectedDatabaseName}.` });
+      return;
+    }
+    let cancelled = false;
+    setDbValidation({ status: "checking", message: "Validating database name..." });
+    validateSqlDatabase(selectedInstanceName, selectedDatabaseName, "target")
+      .then((result) => {
+        if (cancelled) return;
+        const status = result?.status || "unknown";
+        const message = result?.message || status;
+        setDbValidation({ status, message });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        const detail = error?.detail || error?.message || "Failed to validate database name.";
+        setDbValidation({ status: "unknown", message: detail });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedInstanceName, selectedDatabaseName, sqlDatabases]);
 
   useEffect(() => {
     if (configSource === "existingJob" && availableJobs.length === 0 && !loadingJobs) {
@@ -370,6 +401,11 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
     }
     if (!selectedInstanceName || !selectedDatabaseName) {
       setSnackbarMessage("Select a Cloud SQL instance and database before provisioning.");
+      setSnackbarOpen(true);
+      return;
+    }
+    if (dbValidation.status === "instance_not_found" || dbValidation.status === "invalid_name") {
+      setSnackbarMessage(dbValidation.message || "Database validation failed. Please choose a different database or instance.");
       setSnackbarOpen(true);
       return;
     }
@@ -668,19 +704,26 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         </Grid>
         <Grid item xs={12} sm={6}>
           <Autocomplete
-            options={sqlDatabases}
-            getOptionLabel={(db) => db?.name || ""}
+            freeSolo
+            options={sqlDatabases.map((db) => db?.name || "").filter(Boolean)}
             loading={sqlDatabasesLoading}
-            value={sqlDatabases.find((db) => db.name === selectedDatabaseName) || null}
+            value={selectedDatabaseName}
             onChange={(_, newValue) => {
-              setSelectedDatabaseName(newValue?.name || "");
+              setSelectedDatabaseName(newValue || "");
+            }}
+            onInputChange={(_, newInputValue) => {
+              setSelectedDatabaseName(newInputValue || "");
             }}
             renderInput={(params) => (
               <TextField
                 {...params}
                 fullWidth
                 label="Database"
-                helperText={sqlDatabasesError || "Select an existing database in the chosen instance."}
+                helperText={
+                  sqlDatabasesError ||
+                  dbValidation.message ||
+                  "Select or enter a database in the chosen instance."
+                }
               />
             )}
           />

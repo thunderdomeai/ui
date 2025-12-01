@@ -87,6 +87,7 @@ READ_TIMEOUT_MESSAGE = (
 REQUEST_ERROR_MESSAGE = "Unable to contact the service. Please try again."
 SQLADMIN_SCOPE = "https://www.googleapis.com/auth/sqlservice.admin"
 CLOUD_BUILD_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+STORAGE_SCOPE = "https://www.googleapis.com/auth/devstorage.full_control"
 
 # --- Simple server-side credential store ---
 _gcs_bucket = None
@@ -442,6 +443,43 @@ def _get_target_sql_token_and_project() -> Tuple[str, str]:
     return project_id, creds.token
 
 
+def _normalize_scope(scope: Optional[str]) -> str:
+    if not scope:
+        return "target"
+    s = scope.lower()
+    if s in ("provider", "source"):
+        return "source"
+    return "target"
+
+
+def _get_project_and_creds_for_scope(scope: Optional[str], scopes: Optional[list] = None) -> Tuple[str, service_account.Credentials]:
+    """
+    Resolve project ID and credentials for a given scope ("provider"/"source" or "target").
+    """
+    normalized = _normalize_scope(scope)
+    store = _load_store(normalized)
+    entries = store.get("entries") or {}
+    selected_id = store.get("selectedId")
+    entry = entries.get(selected_id) if selected_id else None
+    if not entry:
+        raise HTTPException(status_code=400, detail=f"No selected {normalized} credential available.")
+    sa_info = entry.get("credential") or {}
+    project_id = entry.get("projectId") or sa_info.get("project_id")
+    if not project_id:
+        raise HTTPException(status_code=400, detail=f"{normalized.capitalize()} credential is missing project_id.")
+
+    use_scopes = scopes or [CLOUD_BUILD_SCOPE]
+    try:
+        creds = service_account.Credentials.from_service_account_info(sa_info, scopes=use_scopes)
+        creds.refresh(GoogleRequest())
+    except Exception as exc:
+        logger.error("Failed to create/refresh credentials for scope %s: %s", normalized, exc)
+        raise HTTPException(status_code=500, detail="Unable to use selected credential for validation.")
+    if not creds.token:
+        raise HTTPException(status_code=500, detail="Failed to generate access token for validation.")
+    return project_id, creds
+
+
 def _get_source_build_token_and_project() -> Tuple[str, str, Optional[str]]:
     """
     Retrieve the selected source credential's project ID, a Cloud Build access token, and service account email.
@@ -711,6 +749,149 @@ async def sql_instance_databases(instance_name: str) -> JSONResponse:
             )
 
     return JSONResponse({"projectId": project_id, "instance": instance_name, "databases": dbs})
+
+
+# --- Bucket and database validation helpers ---
+def _is_valid_bucket_name(name: str) -> bool:
+    if not name or not isinstance(name, str):
+        return False
+    if len(name) < 3 or len(name) > 63:
+        return False
+    # Lowercase letters, numbers, dashes, underscores, dots; must start/end with letter/number.
+    import re
+    pattern = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{1,61}[a-z0-9])?$")
+    return bool(pattern.match(name))
+
+
+@app.get("/api/validate/bucket-name")
+async def validate_bucket_name(scope: str = "target", name: Optional[str] = None) -> JSONResponse:
+    """
+    Validate a GCS bucket name for availability/ownership using the selected credential.
+    """
+    if not name:
+        raise HTTPException(status_code=400, detail="Bucket name is required.")
+    if not _is_valid_bucket_name(name):
+        return JSONResponse(
+            {
+                "bucket_name": name,
+                "scope": scope,
+                "status": "invalid_name",
+                "message": f"Bucket name '{name}' is invalid. Use lowercase letters, numbers, dots, underscores, or dashes (3-63 chars).",
+            }
+        )
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[STORAGE_SCOPE])
+    try:
+        client = storage.Client(project=project_id, credentials=creds)
+        bucket = client.lookup_bucket(name)
+    except gcs_exceptions.Forbidden:
+        # Treat as exists elsewhere/inaccessible
+        return JSONResponse(
+            {
+                "bucket_name": name,
+                "scope": scope,
+                "project_id": project_id,
+                "status": "exists_elsewhere",
+                "owner_project": None,
+                "message": f"Bucket {name} exists but is not accessible with the current credential.",
+            }
+        )
+    except Exception as exc:
+        logger.error("Bucket validation failed for %s: %s", name, exc)
+        raise HTTPException(status_code=500, detail="Failed to validate bucket name.")
+
+    if bucket is None:
+        return JSONResponse(
+            {
+                "bucket_name": name,
+                "scope": scope,
+                "project_id": project_id,
+                "status": "available",
+                "owner_project": None,
+                "message": f"Bucket {name} is available to create in project {project_id}.",
+            }
+        )
+
+    bucket_project = getattr(bucket, "project", None) or getattr(bucket, "project_number", None)
+    status = "exists_in_project" if str(bucket_project) == str(project_id) else "exists_elsewhere"
+    message = (
+        f"Bucket {name} exists in project {bucket_project}; can be reused."
+        if status == "exists_in_project"
+        else f"Bucket {name} already exists in another project ({bucket_project}); choose a different name."
+    )
+    return JSONResponse(
+        {
+            "bucket_name": name,
+            "scope": scope,
+            "project_id": project_id,
+            "status": status,
+            "owner_project": bucket_project,
+            "message": message,
+        }
+    )
+
+
+@app.get("/api/sql/validate-database")
+async def validate_sql_database(instance: Optional[str] = None, database: Optional[str] = None, scope: str = "target") -> JSONResponse:
+    """
+    Validate whether a database exists within a Cloud SQL instance using the selected credential.
+    """
+    if not instance or not database:
+        raise HTTPException(status_code=400, detail="instance and database are required.")
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance}/databases"
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL Admin database validation request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        raise HTTPException(status_code=502, detail="Invalid response from Cloud SQL Admin.")
+
+    if resp.status_code == 404:
+        return JSONResponse(
+            {
+                "instance": instance,
+                "database": database,
+                "project_id": project_id,
+                "status": "instance_not_found",
+                "message": f"Instance {instance} was not found in project {project_id}.",
+            },
+            status_code=200,
+        )
+
+    if resp.is_error:
+        raise HTTPException(status_code=resp.status_code, detail=payload)
+
+    items = payload.get("items") or []
+    exists = any(db.get("name") == database for db in items)
+    if exists:
+        return JSONResponse(
+            {
+                "instance": instance,
+                "database": database,
+                "project_id": project_id,
+                "status": "exists",
+                "message": f"Database {database} exists in instance {instance}.",
+            }
+        )
+
+    return JSONResponse(
+        {
+            "instance": instance,
+            "database": database,
+            "project_id": project_id,
+            "status": "missing",
+            "message": f"Database {database} does not exist in instance {instance} and can be created.",
+        }
+    )
 
 
 # --- Provider bootstrap via Cloud Build using the selected source credential ---

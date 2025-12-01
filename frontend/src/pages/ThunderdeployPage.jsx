@@ -33,7 +33,14 @@ import PageLayout from "../components/PageLayout.jsx";
 import TenantProvisioningForm from "../components/TenantProvisioningForm.jsx";
 import { getAccessTokenFromServiceAccount, GOOGLE_CLOUD_SCOPES } from "../utils/deployGoogleAuth.js";
 import { fetchJobExecutionLogs } from "../utils/deployLogs.js";
-import { triggerDeploy, getJob, getJobStatus, fetchProviderHealth, bootstrapProvider } from "../utils/api.js";
+import {
+  triggerDeploy,
+  getJob,
+  getJobStatus,
+  fetchProviderHealth,
+  bootstrapProvider,
+  validateBucketName,
+} from "../utils/api.js";
 
 const defaultGithubToken =
   import.meta.env.VITE_GITHUB_TOKEN ||
@@ -251,6 +258,8 @@ export default function ThunderdeployPage() {
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapResult, setBootstrapResult] = useState(null);
   const [bootstrapError, setBootstrapError] = useState("");
+  const [bootstrapBucketChecks, setBootstrapBucketChecks] = useState([]);
+  const [bootstrapBucketChecking, setBootstrapBucketChecking] = useState(false);
 
   const sourceCredentialStore = useCredentialStore('source');
   const targetCredentialStore = useCredentialStore('target');
@@ -544,6 +553,39 @@ export default function ThunderdeployPage() {
         setProviderHealthLoading(false);
       });
   }, [isTenantsView, sourceCredentialStore.selectedId, targetCredentialStore.selectedId]);
+
+  useEffect(() => {
+    if (!isTenantsView || !providerProjectId || !hasActiveSourceCredential) {
+      setBootstrapBucketChecks([]);
+      return;
+    }
+    const derivedNames = [
+      `${providerProjectId}-thunderfront-credentials`,
+      `${providerProjectId}-deployment-artifacts`,
+      `${providerProjectId}-trigger-service-data`,
+    ];
+    setBootstrapBucketChecking(true);
+    Promise.all(
+      derivedNames.map(async (name) => {
+        try {
+          const res = await validateBucketName("provider", name);
+          return { name, ...(res || {}) };
+        } catch (err) {
+          return {
+            name,
+            status: "unknown",
+            message: err?.detail || err?.message || "Bucket validation failed.",
+          };
+        }
+      }),
+    )
+      .then((results) => setBootstrapBucketChecks(results))
+      .catch((err) => {
+        console.error("Bucket preflight validation failed:", err);
+        setBootstrapBucketChecks([]);
+      })
+      .finally(() => setBootstrapBucketChecking(false));
+  }, [isTenantsView, providerProjectId, hasActiveSourceCredential]);
 
   useEffect(() => {
     deploymentInstancesRef.current = deploymentInstances;
@@ -1810,6 +1852,9 @@ export default function ThunderdeployPage() {
   }, [bootstrapRegion, bootstrapBranch, providerProjectId]);
 
   const renderProviderBootstrapCard = () => {
+    const hasBucketConflict = bootstrapBucketChecks.some(
+      (check) => check.status === "exists_elsewhere" || check.status === "invalid_name",
+    );
     return (
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack spacing={2}>
@@ -1853,6 +1898,31 @@ export default function ThunderdeployPage() {
               />
             </Grid>
           </Grid>
+          <Stack spacing={1}>
+            <Typography variant="body2" fontWeight={600}>
+              Bucket preflight
+            </Typography>
+            {bootstrapBucketChecking && <Alert severity="info">Validating bucket names...</Alert>}
+            {!bootstrapBucketChecking && bootstrapBucketChecks.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                Bucket validations will appear here once a provider project is selected.
+              </Typography>
+            ) : null}
+            {!bootstrapBucketChecking &&
+              bootstrapBucketChecks.map((check) => {
+                const severity =
+                  check.status === "exists_elsewhere" || check.status === "invalid_name"
+                    ? "error"
+                    : check.status === "available" || check.status === "exists_in_project"
+                      ? "success"
+                      : "warning";
+                return (
+                  <Alert key={check.name} severity={severity}>
+                    {check.message || `Bucket ${check.name}: ${check.status || "unknown"}`}
+                  </Alert>
+                );
+              })}
+          </Stack>
           {bootstrapError ? <Alert severity="error">{bootstrapError}</Alert> : null}
           {bootstrapResult ? (
             <Alert severity="info">
@@ -1868,7 +1938,7 @@ export default function ThunderdeployPage() {
             <Button
               variant="contained"
               onClick={triggerProviderBootstrap}
-              disabled={bootstrapLoading || !hasActiveSourceCredential || !providerProjectId}
+              disabled={bootstrapLoading || !hasActiveSourceCredential || !providerProjectId || hasBucketConflict}
               startIcon={bootstrapLoading ? <CircularProgress size={16} color="inherit" /> : null}
             >
               {bootstrapLoading ? "Starting bootstrap..." : "Bootstrap provider"}
