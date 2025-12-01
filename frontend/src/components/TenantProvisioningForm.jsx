@@ -24,6 +24,7 @@ import {
   getJob,
   listSqlInstances,
   listSqlDatabases,
+  finalizeTenantStack,
 } from "../utils/api.js";
 
 const defaultGithubToken =
@@ -445,8 +446,26 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         dbName,
       });
 
+      const tenantMetadata = {
+        project_id: tenantProjectId,
+        tenant_slug: tenantSlug,
+        region,
+        database_instance: connectionName,
+        database_name: dbName,
+      };
+
+      const finalizeResp = await finalizeTenantStack({
+        userrequirements,
+        tenant_metadata: tenantMetadata,
+      });
+
+      const finalizedUserrequirements =
+        finalizeResp?.userrequirements && typeof finalizeResp.userrequirements === "object"
+          ? finalizeResp.userrequirements
+          : userrequirements;
+
       const finalUserrequirements = {
-        ...userrequirements,
+        ...finalizedUserrequirements,
         tenant_config: tenantConfig,
       };
       const finalUserrequirementsWithToken = fillGithubToken(finalUserrequirements, defaultGithubToken);
@@ -478,7 +497,17 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       }
     } catch (error) {
       console.error("Error triggering tenant stack deployment:", error);
-      const message = error?.message || "Unknown error";
+      const detail = error?.detail || error?.message || "Unknown error";
+      const message =
+        typeof detail === "string"
+          ? detail
+          : detail?.message
+            ? `${detail.message}${
+                Array.isArray(detail.placeholders) && detail.placeholders.length
+                  ? ` (unresolved: ${detail.placeholders.join(", ")})`
+                  : ""
+              }`
+            : "Unknown error";
       const isTimeout =
         error?.status === 504 ||
         message.toLowerCase().includes("timeout") ||

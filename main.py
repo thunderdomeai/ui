@@ -1196,6 +1196,42 @@ DEFAULT_SAMPLE_PATHS = [
 ]
 
 
+def _load_canonical_userrequirements() -> Dict[str, Any]:
+    """
+    Load the canonical provider userrequirements without sanitization.
+    Uses the same search order as /api/deploy/sample-userrequirements.
+    """
+    candidate_paths = [p for p in DEFAULT_SAMPLE_PATHS if p]
+    for path in candidate_paths:
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    return payload
+            except Exception as exc:
+                logger.warning("Failed to parse canonical userrequirements at %s: %s", path, exc)
+                continue
+    raise HTTPException(
+        status_code=500,
+        detail=f"Canonical userrequirements not found. Tried: {[str(p) for p in candidate_paths]}",
+    )
+
+
+def _canonical_agent_env_by_name(canonical: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Build a lookup of agent name -> canonical environment block.
+    """
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for agent in canonical.get("agents") or []:
+        if not isinstance(agent, dict):
+            continue
+        name = agent.get("name")
+        env = agent.get("environment")
+        if name and isinstance(env, dict):
+            mapping[name] = env
+    return mapping
+
+
 @app.get("/api/deploy/sample-userrequirements")
 async def deploy_sample_userrequirements(request: Request) -> JSONResponse:
     """
@@ -1217,6 +1253,217 @@ async def deploy_sample_userrequirements(request: Request) -> JSONResponse:
                 raise HTTPException(status_code=500, detail=f"Failed to read sample userrequirements: {exc}")
 
     raise HTTPException(status_code=404, detail=f"Sample userrequirements not found. Tried: {[str(p) for p in candidate_paths]}")
+
+
+def _placeholder_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return True
+        if stripped.upper() == "PLACEHOLDER":
+            return True
+        if stripped.startswith("REPLACE_ME_"):
+            return True
+    return False
+
+
+def _get_extra_env(env: Dict[str, Any], key: str) -> Optional[Any]:
+    extra = env.get("extra_env")
+    if isinstance(extra, dict):
+        return extra.get(key)
+    if isinstance(extra, list):
+        for entry in extra:
+            if not isinstance(entry, dict):
+                continue
+            entry_key = entry.get("key") or entry.get("name")
+            if entry_key == key:
+                return entry.get("value")
+    return None
+
+
+def _set_extra_env(env: Dict[str, Any], key: str, value: Any) -> None:
+    extra = env.get("extra_env")
+    if isinstance(extra, dict):
+        updated = dict(extra)
+        updated[key] = value
+        env["extra_env"] = updated
+        return
+    if isinstance(extra, list):
+        new_entries = []
+        updated = False
+        for entry in extra:
+            if isinstance(entry, dict):
+                entry_key = entry.get("key") or entry.get("name")
+                if entry_key == key:
+                    new_entry = dict(entry)
+                    new_entry["key"] = key
+                    new_entry["value"] = value
+                    updated = True
+                    new_entries.append(new_entry)
+                else:
+                    new_entries.append(entry)
+        if not updated:
+            new_entries.append({"key": key, "value": value})
+        env["extra_env"] = new_entries
+        return
+    env["extra_env"] = [{"key": key, "value": value}]
+
+
+def _maybe_set_env_or_extra(env: Dict[str, Any], key: str, value: Any) -> None:
+    """
+    Set key on environment or extra_env if current value is missing/placeholder.
+    Preference: replace top-level if present and placeholder, otherwise ensure in extra_env.
+    """
+    current = env.get(key)
+    if current is not None:
+        if _placeholder_value(current):
+            env[key] = value
+            return
+    extra_val = _get_extra_env(env, key)
+    if extra_val is None or _placeholder_value(extra_val):
+        _set_extra_env(env, key, value)
+
+
+def _collect_placeholder_paths(node: Any, path: list, out: list) -> None:
+    """
+    Walks the structure and collects critical placeholders.
+    """
+    critical_prefixes = ("DB_", "POSTGRES_")
+    critical_keys = {"DATABASE_URL", "DEFAULT_MAX_TOKENS", "REPO_URL", "GITHUB_TOKEN"}
+
+    if isinstance(node, dict):
+        # Handle extra_env entries specially when keyed by "key"/"value"
+        if "key" in node and "value" in node and len(node) <= 3:
+            env_key = node.get("key") or node.get("name")
+            env_val = node.get("value")
+            key_path = ".".join(path + [env_key or "value"])
+            if env_key:
+                upper_key = env_key.upper()
+                is_critical = (
+                    upper_key in critical_keys
+                    or upper_key.startswith(critical_prefixes)
+                    or upper_key == "DEFAULT_MAX_TOKENS"
+                )
+            else:
+                is_critical = False
+            if isinstance(env_val, str):
+                contains_bad_git = "REPLACE_ME_GITHUB_TOKEN" in env_val or "REPLACE_ME_REPO_URL" in env_val
+            else:
+                contains_bad_git = False
+            if is_critical and _placeholder_value(env_val):
+                out.append(f"{key_path}={env_val}")
+            elif contains_bad_git:
+                out.append(f"{key_path}={env_val}")
+            return
+
+        for k, v in node.items():
+            _collect_placeholder_paths(v, path + [str(k)], out)
+        return
+
+    if isinstance(node, list):
+        for idx, item in enumerate(node):
+            _collect_placeholder_paths(item, path + [f"[{idx}]"], out)
+        return
+
+    if isinstance(node, str):
+        last_key = path[-1] if path else ""
+        upper_key = last_key.upper()
+        is_critical = (
+            upper_key in {"DATABASE_URL", "DEFAULT_MAX_TOKENS", "GITHUB_TOKEN", "REPO_URL"}
+            or upper_key.startswith(critical_prefixes)
+        )
+        contains_bad_git = "REPLACE_ME_GITHUB_TOKEN" in node or "REPLACE_ME_REPO_URL" in node
+        if (is_critical and _placeholder_value(node)) or contains_bad_git:
+            out.append(f"{'.'.join(path)}={node}")
+
+
+def finalize_tenant_userrequirements(
+    tenant_ur: Dict[str, Any],
+    tenant_meta: Dict[str, Any],
+    canonical_ur: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Resolve DB/LLM defaults for a tenant userrequirements using canonical provider config.
+    Also validates that no critical placeholders remain.
+    """
+    try:
+        finalized = json.loads(json.dumps(tenant_ur))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid userrequirements payload: {exc}")
+
+    canonical_by_name = _canonical_agent_env_by_name(canonical_ur)
+
+    agents = finalized.get("agents")
+    if isinstance(agents, list):
+        for agent in agents:
+            if not isinstance(agent, dict):
+                continue
+            env = agent.get("environment")
+            if not isinstance(env, dict):
+                continue
+
+            canonical_env = canonical_by_name.get(agent.get("name"))
+            connect_db = env.get("connectDatabase")
+
+            if connect_db:
+                db_instance = tenant_meta.get("database_instance")
+                db_name = tenant_meta.get("database_name")
+                if not db_instance or not db_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Database instance and name are required when connectDatabase is enabled.",
+                    )
+                env["database_instance"] = db_instance
+                env["database_name"] = db_name
+                db_username = tenant_meta.get("db_username") or (canonical_env.get("db_username") if canonical_env else None)
+                db_password = tenant_meta.get("db_password") or (canonical_env.get("db_password") if canonical_env else None)
+                if not db_username or not db_password:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Database username/password are required when connectDatabase is enabled.",
+                    )
+                env["db_username"] = db_username
+                env["db_password"] = db_password
+
+                db_socket = f"/cloudsql/{db_instance}"
+                database_url = f"postgresql://{db_username}:{db_password}@/{db_name}?host={db_socket}"
+
+                _maybe_set_env_or_extra(env, "DATABASE_URL", database_url)
+                _maybe_set_env_or_extra(env, "DB_HOST", db_socket)
+                _maybe_set_env_or_extra(env, "DB_CONNECTION", db_socket)
+                _maybe_set_env_or_extra(env, "POSTGRES_DB", db_name)
+                _maybe_set_env_or_extra(env, "POSTGRES_USER", db_username)
+                _maybe_set_env_or_extra(env, "POSTGRES_PASSWORD", db_password)
+                _maybe_set_env_or_extra(env, "POSTGRES_HOST", db_socket)
+
+                canonical_port = None
+                if canonical_env:
+                    canonical_port = _get_extra_env(canonical_env, "POSTGRES_PORT") or canonical_env.get("POSTGRES_PORT")
+                default_port = str(canonical_port) if canonical_port else "5432"
+                _maybe_set_env_or_extra(env, "POSTGRES_PORT", default_port)
+
+            canonical_max_tokens = None
+            if canonical_env:
+                canonical_max_tokens = _get_extra_env(canonical_env, "DEFAULT_MAX_TOKENS") or canonical_env.get("DEFAULT_MAX_TOKENS")
+            max_tokens_default = str(canonical_max_tokens) if canonical_max_tokens else "16384"
+            current_max_tokens = _get_extra_env(env, "DEFAULT_MAX_TOKENS") or env.get("DEFAULT_MAX_TOKENS")
+            if _placeholder_value(current_max_tokens):
+                _set_extra_env(env, "DEFAULT_MAX_TOKENS", max_tokens_default)
+
+    placeholders: list = []
+    _collect_placeholder_paths(finalized, [], placeholders)
+    if placeholders:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Tenant stack contains unresolved critical placeholders.",
+                "placeholders": placeholders,
+            },
+        )
+
+    return finalized
 
 
 @app.get("/api/tenant-stack/template")
@@ -1243,6 +1490,28 @@ async def tenant_stack_templates() -> JSONResponse:
         logger.exception("Failed to list tenant stack templates: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to list tenant stack templates: {exc}")
     return JSONResponse({"templates": templates})
+
+
+@app.post("/api/tenant-stack/finalize")
+async def tenant_stack_finalize(request: Request) -> JSONResponse:
+    """
+    Finalize a tenant-scoped userrequirements by applying DB/LLM defaults from the canonical provider config
+    and validating critical placeholders.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    tenant_ur = body.get("userrequirements")
+    tenant_meta = body.get("tenant_metadata") or {}
+
+    if not isinstance(tenant_ur, dict):
+        raise HTTPException(status_code=400, detail="Missing or invalid userrequirements object.")
+
+    canonical_ur = _load_canonical_userrequirements()
+    finalized = finalize_tenant_userrequirements(tenant_ur, tenant_meta, canonical_ur)
+    return JSONResponse({"userrequirements": finalized})
 
 
 @app.get("/api/agent-catalog")

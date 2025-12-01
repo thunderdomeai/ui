@@ -187,3 +187,10 @@ export async function bootstrapProvider(body = {}) {
     body: JSON.stringify(body || {}),
   });
 }
+
+export async function finalizeTenantStack(body = {}) {
+  return fetchJson("/api/tenant-stack/finalize", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
+  });
+}
