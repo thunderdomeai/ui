@@ -26,6 +26,7 @@ import {
   HealthAndSafety as HealthIcon,
   Menu as MenuIcon,
   IntegrationInstructions as AgentIcon,
+  CloudQueue as CloudQueueIcon,
 } from "@mui/icons-material";
 import { useTheme } from "@mui/material/styles";
 import DashboardPage from "./pages/DashboardPage.jsx";
@@ -38,14 +39,16 @@ import CredentialsPage from "./pages/CredentialsPage.jsx";
 import ActiveDeploymentsPage from "./pages/ActiveDeploymentsPage.jsx";
 import TenantDetailPage from "./pages/TenantDetailPage.jsx";
 import ThunderdeployPage from "./pages/ThunderdeployPage.jsx";
-import SetupWizardPage from "./pages/SetupWizardPage.jsx";
+import ProviderSetupPage from "./pages/ProviderSetupPage.jsx";
+import TenantSetupPage from "./pages/TenantSetupPage.jsx";
 import { useConfig } from "./hooks/useConfig.js";
 
 const drawerWidth = 260;
 
 const navItems = [
   { label: "Overview", path: "/", icon: <DashboardIcon /> },
-  { label: "Setup Wizard", path: "/wizard", icon: <BuildIcon /> },
+  { label: "Provider Setup", path: "/provider-setup", icon: <BuildIcon /> },
+  { label: "Tenant Setup", path: "/tenant-setup", icon: <CloudQueueIcon /> },
   { label: "Onboarding", path: "/onboarding", icon: <SettingsIcon /> },
   { label: "Permissions", path: "/permissions", icon: <SecurityIcon /> },
   { label: "Priming", path: "/priming", icon: <StorageIcon /> },
@@ -183,7 +186,8 @@ export default function App() {
       <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, mt: 8, overflow: "auto" }}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/wizard" element={<SetupWizardPage />} />
+          <Route path="/provider-setup" element={<ProviderSetupPage />} />
+          <Route path="/tenant-setup" element={<TenantSetupPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/priming" element={<PrimingPage />} />
