@@ -58,6 +58,85 @@ function formatDate(value) {
   }
 }
 
+function classifyJobOutcome(job) {
+  const rawStatus = (
+    job?.status_overall_job_execution ||
+    job?.status ||
+    job?.job_execution_status ||
+    ""
+  ).toString();
+  const rawOutcome = (job?.deployment_outcome || "").toString();
+  const status = rawStatus.toLowerCase();
+  const outcome = rawOutcome.toLowerCase();
+
+  const hasServiceUrl = !!(job?.deployed_service_url || job?.service_url);
+  const isRunning = status === "running" || status === "in_progress";
+  const isSubmittedOnly = !status && !outcome && !hasServiceUrl;
+
+  const looksSuccessful =
+    outcome.includes("success") ||
+    outcome.includes("succeeded") ||
+    outcome.includes("deployed") ||
+    status === "succeeded" ||
+    status === "success" ||
+    status === "completed";
+
+  const looksFailed =
+    outcome.includes("error") ||
+    outcome.includes("failed") ||
+    outcome.includes("cancelled") ||
+    outcome.includes("canceled") ||
+    status === "failed" ||
+    status === "error";
+
+  if (looksFailed && hasServiceUrl) {
+    return {
+      chipStatus: "degraded",
+      chipLabel: "Soft-fail (service ready with warnings)",
+    };
+  }
+
+  if (looksFailed && !hasServiceUrl) {
+    return {
+      chipStatus: "down",
+      chipLabel: rawOutcome || rawStatus || "Failed",
+    };
+  }
+
+  if (looksSuccessful && hasServiceUrl) {
+    return {
+      chipStatus: "healthy",
+      chipLabel: "Success",
+    };
+  }
+
+  if (looksSuccessful) {
+    return {
+      chipStatus: "healthy",
+      chipLabel: rawOutcome || rawStatus || "Success",
+    };
+  }
+
+  if (isRunning) {
+    return {
+      chipStatus: "pending",
+      chipLabel: "Running",
+    };
+  }
+
+  if (isSubmittedOnly) {
+    return {
+      chipStatus: "pending",
+      chipLabel: "Submitted",
+    };
+  }
+
+  return {
+    chipStatus: "pending",
+    chipLabel: rawOutcome || rawStatus || "Pending",
+  };
+}
+
 export default function DashboardPage() {
   const [filters, setFilters] = useState({
     tenant_id: "",
@@ -288,6 +367,7 @@ export default function DashboardPage() {
                   {jobs.map((job, idx) => {
                     const tenantId = job.tenant_id || job.client_project || job.project_id;
                     const service = job.service_name || job.service || job.instance_id;
+                    const serviceUrl = job.deployed_service_url || job.service_url || "";
                     const rowKey = job.job_identifier || job.id || job.instance_id || job.job_execution_name || `job-${idx}`;
                     return (
                       <TableRow key={rowKey}>
@@ -297,7 +377,10 @@ export default function DashboardPage() {
                           </Tooltip>
                         </TableCell>
                         <TableCell>
-                          <StatusChip status={job.status_overall_job_execution || job.status} />
+                          {(() => {
+                            const { chipStatus, chipLabel } = classifyJobOutcome(job);
+                            return <StatusChip status={chipStatus} label={chipLabel} />;
+                          })()}
                         </TableCell>
                         <TableCell>{tenantId || "—"}</TableCell>
                         <TableCell>{service || "—"}</TableCell>
@@ -321,6 +404,17 @@ export default function DashboardPage() {
                             <Button size="small" onClick={() => openLogs(job)}>
                               Logs
                             </Button>
+                            {serviceUrl ? (
+                              <Button
+                                size="small"
+                                component="a"
+                                href={serviceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                Open
+                              </Button>
+                            ) : null}
                           </Stack>
                         </TableCell>
                       </TableRow>
@@ -347,11 +441,10 @@ export default function DashboardPage() {
             ) : (
               <Stack spacing={1}>
                 <Typography variant="subtitle1">{selectedJob.instance_id || selectedJob.job_identifier}</Typography>
-                <Chip
-                  label={selectedJob.status_overall_job_execution || selectedJob.status || "unknown"}
-                  color="primary"
-                  size="small"
-                />
+                {(() => {
+                  const { chipStatus, chipLabel } = classifyJobOutcome(selectedJob);
+                  return <StatusChip status={chipStatus} label={chipLabel} />;
+                })()}
                 <Typography variant="body2" color="text.secondary">
                   Tenant: {selectedJob.tenant_id || selectedJob.client_project || "—"}
                 </Typography>

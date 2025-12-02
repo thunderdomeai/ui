@@ -11,7 +11,8 @@ const palette = {
 export default function StatusChip({ status, label }) {
   const lower = (status || "").toLowerCase();
   const mapping = palette[lower] || { color: "default", label: status || "Unknown" };
-  return <Chip size="small" color={mapping.color} label={label || mapping.label} />;
+  const chipLabel = label || mapping.label;
+  return <Chip size="small" color={mapping.color} label={chipLabel} />;
 }
 
 StatusChip.propTypes = {
