@@ -209,3 +209,30 @@ export async function finalizeTenantStack(body = {}) {
     body: JSON.stringify(body || {}),
   });
 }
+
+export async function runMassDeploy({
+  projectId,
+  region,
+  branch,
+  repoUrl,
+  dryRun = false,
+  includeSchedulers = false,
+  deploymentTag,
+} = {}) {
+  const body = {
+    ...(projectId ? { project_id: projectId } : {}),
+    ...(region ? { region } : {}),
+    ...(branch ? { branch } : {}),
+    ...(repoUrl ? { repo_url: repoUrl } : {}),
+    dry_run: !!dryRun,
+    include_schedulers: !!includeSchedulers,
+  };
+  if (deploymentTag) {
+    body.deployment_tag = deploymentTag;
+  }
+  return fetchJson("/api/thunderdeploy/deploy-agents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}

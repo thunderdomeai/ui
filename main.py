@@ -969,6 +969,145 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
     return JSONResponse(result, status_code=resp.status_code)
 
 
+@app.post("/api/thunderdeploy/deploy-agents")
+async def thunderdeploy_deploy_agents(request: Request) -> JSONResponse:
+    """
+    Kick off a Cloud Build that runs thunderdeploy/deploy_agents_ordered.py for a 10-agent stack.
+    Supports dry-run preview and optional inclusion of scheduling agents.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    region = (body.get("region") or "us-central1").strip() or "us-central1"
+    branch = (body.get("branch") or "main").strip() or "main"
+    repo_url = (body.get("repo_url") or "https://github.com/thunderdomeai/thunderdeploy.git").strip()
+    dry_run = bool(body.get("dry_run"))
+    include_schedulers = bool(body.get("include_schedulers"))
+    deployment_tag = (body.get("deployment_tag") or "").strip()
+    requested_project_id = (body.get("project_id") or "").strip()
+
+    source_store = _load_store("source")
+    target_store = _load_store("target")
+    source_entry = (source_store.get("entries") or {}).get(source_store.get("selectedId"))
+    target_entry = (target_store.get("entries") or {}).get(target_store.get("selectedId"))
+    if not source_entry or not source_entry.get("credential"):
+        raise HTTPException(status_code=400, detail="Active source credential is required for mass deploy.")
+    if not target_entry or not target_entry.get("credential"):
+        raise HTTPException(status_code=400, detail="Active target credential is required for mass deploy.")
+
+    runner_sa_info = source_entry.get("credential") or {}
+    customer_sa_info = target_entry.get("credential") or {}
+    target_project_id = (
+        requested_project_id
+        or target_entry.get("projectId")
+        or customer_sa_info.get("project_id")
+        or "thunderdeployone"
+    )
+
+    if not TRIGGERSERVICE_BASE_URL:
+        raise HTTPException(status_code=500, detail="TriggerService base URL not configured.")
+
+    config_path = (
+        "config/thunderdeployone_userrequirements_final.json"
+        if include_schedulers
+        else "execdir/thunderdeployone_no_sched.json"
+    )
+
+    build_project_id, access_token, build_sa_email = _get_source_build_token_and_project()
+
+    runner_sa_b64 = base64.b64encode(json.dumps(runner_sa_info).encode("utf-8")).decode("utf-8")
+    customer_sa_b64 = base64.b64encode(json.dumps(customer_sa_info).encode("utf-8")).decode("utf-8")
+
+    clone_step = {
+        "name": "gcr.io/cloud-builders/git",
+        "entrypoint": "/bin/sh",
+        "args": ["-c", f"git clone --depth 1 --branch {branch} {repo_url}"],
+    }
+
+    deploy_cmd = (
+        f"python3 deploy_agents_ordered.py {target_project_id} "
+        f"--region {region} "
+        f"--config {config_path} "
+        f"--runner-sa runner_sa.json "
+        f"--customer-sa customer_sa.json "
+        f"--trigger-url {TRIGGERSERVICE_BASE_URL} "
+        "--auto-prefix-buckets --allow-skipped"
+    )
+    if dry_run:
+        deploy_cmd += " --dry-run"
+    if deployment_tag:
+        deploy_cmd += f" --deployment-tag {deployment_tag}"
+
+    deploy_command = " && ".join(
+        [
+            "cd thunderdeploy",
+            'echo "$RUNNER_SA_B64" | base64 -d > runner_sa.json',
+            'echo "$CUSTOMER_SA_B64" | base64 -d > customer_sa.json',
+            deploy_cmd,
+        ]
+    )
+
+    deploy_step = {
+        "name": "gcr.io/cloud-builders/gcloud",
+        "entrypoint": "/bin/sh",
+        "dir": ".",
+        "env": [
+            f"RUNNER_SA_B64={runner_sa_b64}",
+            f"CUSTOMER_SA_B64={customer_sa_b64}",
+            f"TRIGGERSERVICE_BASE_URL={TRIGGERSERVICE_BASE_URL}",
+            f"TARGET_PROJECT_ID={target_project_id}",
+            f"REGION={region}",
+        ],
+        "args": ["-c", deploy_command],
+    }
+
+    build_body: Dict[str, Any] = {
+        "steps": [clone_step, deploy_step],
+        "timeout": "3600s",
+        "options": {"substitutionOption": "ALLOW_LOOSE"},
+        "tags": ["deploy-agents", "unified-ui"],
+    }
+    if build_sa_email:
+        build_body["serviceAccount"] = build_sa_email
+
+    url = f"https://cloudbuild.googleapis.com/v1/projects/{build_project_id}/builds"
+    headers = {"Authorization": f"Bearer {access_token}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=build_body)
+    except httpx.RequestError as exc:
+        logger.error("Cloud Build deploy request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud Build.")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+
+    if resp.is_error or payload is None:
+        detail = payload or resp.text
+        logger.error("Cloud Build deploy failed: %s", detail)
+        raise HTTPException(status_code=resp.status_code, detail=detail)
+
+    result = {
+        "buildId": payload.get("id"),
+        "status": payload.get("status"),
+        "logUrl": payload.get("logUrl"),
+        "buildProjectId": build_project_id,
+        "targetProjectId": target_project_id,
+        "region": region,
+        "dryRun": bool(dry_run),
+        "includeSchedulers": bool(include_schedulers),
+        "configPath": config_path,
+        "branch": branch,
+        "repo": repo_url,
+    }
+    return JSONResponse(result, status_code=resp.status_code)
+
+
 # --- Deploy configuration store (simple JSON persisted on disk) ---
 CONFIG_STORE_FILE = DATA_DIR / "deploy-configs.json"
 

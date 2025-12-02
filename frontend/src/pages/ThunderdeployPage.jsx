@@ -13,6 +13,7 @@ import {
   Select,
   MenuItem,
   FormControl,
+  FormLabel,
   InputLabel,
   CircularProgress,
   Snackbar,
@@ -26,6 +27,8 @@ import {
   Link,
   Stack,
   Chip,
+  RadioGroup,
+  Radio,
 } from "@mui/material";
 import { Add, Delete, HelpOutline, Launch, Refresh, Link as LinkIcon, FileCopy as FileCopyIcon, Download as DownloadIcon, VpnKey } from "@mui/icons-material";
 import { useCredentialStore } from "../hooks/credentials/useCredentialStores.js";
@@ -40,6 +43,7 @@ import {
   fetchProviderHealth,
   bootstrapProvider,
   validateBucketName,
+  runMassDeploy,
 } from "../utils/api.js";
 
 const defaultGithubToken =
@@ -260,6 +264,10 @@ export default function ThunderdeployPage() {
   const [bootstrapError, setBootstrapError] = useState("");
   const [bootstrapBucketChecks, setBootstrapBucketChecks] = useState([]);
   const [bootstrapBucketChecking, setBootstrapBucketChecking] = useState(false);
+  const [massDeployDryRun, setMassDeployDryRun] = useState(true);
+  const [massDeployIncludeSchedulers, setMassDeployIncludeSchedulers] = useState(false);
+  const [massDeployBusy, setMassDeployBusy] = useState(false);
+  const [massDeployResult, setMassDeployResult] = useState(null);
 
   const sourceCredentialStore = useCredentialStore('source');
   const targetCredentialStore = useCredentialStore('target');
@@ -1851,6 +1859,37 @@ export default function ThunderdeployPage() {
     }
   }, [bootstrapRegion, bootstrapBranch, providerProjectId]);
 
+  const handleMassDeploy = useCallback(async () => {
+    if (!hasActiveSourceCredential || !hasActiveTargetCredential) {
+      setSnackbarMessage("Activate both provider (source) and target credentials before running mass deploy.");
+      setSnackbarOpen(true);
+      return;
+    }
+    if ((providerHealth?.overall_status || "").toLowerCase() === "error") {
+      setSnackbarMessage("Provider setup is blocking deploy. Fix provider health issues first.");
+      setSnackbarOpen(true);
+      return;
+    }
+    setMassDeployBusy(true);
+    setMassDeployResult(null);
+    try {
+      const response = await runMassDeploy({
+        dryRun: massDeployDryRun,
+        includeSchedulers: massDeployIncludeSchedulers,
+      });
+      setMassDeployResult(response);
+      const prefix = massDeployDryRun ? "Dry-run started" : "Deployment started";
+      const details = response?.buildId ? `Build ${response.buildId}` : "";
+      setSnackbarMessage(`${prefix}. ${details}`.trim());
+    } catch (error) {
+      console.error("Mass deploy failed", error);
+      setSnackbarMessage(error?.detail || error?.message || "Mass deploy failed.");
+    } finally {
+      setMassDeployBusy(false);
+      setSnackbarOpen(true);
+    }
+  }, [hasActiveSourceCredential, hasActiveTargetCredential, providerHealth, massDeployDryRun, massDeployIncludeSchedulers]);
+
   const renderProviderBootstrapCard = () => {
     const hasBucketConflict = bootstrapBucketChecks.some(
       (check) => check.status === "exists_elsewhere" || check.status === "invalid_name",
@@ -1942,6 +1981,66 @@ export default function ThunderdeployPage() {
               startIcon={bootstrapLoading ? <CircularProgress size={16} color="inherit" /> : null}
             >
               {bootstrapLoading ? "Starting bootstrap..." : "Bootstrap provider"}
+            </Button>
+          </Box>
+        </Stack>
+      </Paper>
+    );
+  };
+
+  const renderMassDeployCard = () => {
+    const providerBlocked = (providerHealth?.overall_status || "").toLowerCase() === "error";
+    const disabled =
+      massDeployBusy || providerBlocked || !hasActiveSourceCredential || !hasActiveTargetCredential;
+    return (
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack spacing={2}>
+          <Typography variant="h6">Preview / Run 10-agent deploy</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Run the thunderdeploy 10-agent stack via deploy_agents_ordered.py. Preview (dry-run) first; production deploy skips scheduling agents by default.
+          </Typography>
+          <FormControl component="fieldset">
+            <FormLabel component="legend">Mode</FormLabel>
+            <RadioGroup
+              row
+              value={massDeployDryRun ? "dry-run" : "deploy"}
+              onChange={(e) => setMassDeployDryRun(e.target.value === "dry-run")}
+            >
+              <FormControlLabel value="dry-run" control={<Radio />} label="Preview (dry-run)" />
+              <FormControlLabel value="deploy" control={<Radio />} label="Run deploy" />
+            </RadioGroup>
+          </FormControl>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={massDeployIncludeSchedulers}
+                onChange={(e) => setMassDeployIncludeSchedulers(e.target.checked)}
+              />
+            }
+            label="Include scheduling agents (slower builds)"
+          />
+          {massDeployResult ? (
+            <Alert severity="info">
+              {massDeployResult.dryRun ? "Dry-run" : "Deploy"} build {massDeployResult.buildId || "submitted"} (
+              {massDeployResult.status || "QUEUED"}).{" "}
+              {massDeployResult.logUrl ? (
+                <Link href={massDeployResult.logUrl} target="_blank" rel="noopener noreferrer">
+                  View logs
+                </Link>
+              ) : null}
+            </Alert>
+          ) : null}
+          {providerBlocked ? (
+            <Alert severity="warning">Provider setup is blocking deploy. Fix provider health first.</Alert>
+          ) : null}
+          <Box display="flex" justifyContent="flex-end">
+            <Button
+              variant="contained"
+              onClick={handleMassDeploy}
+              disabled={disabled}
+              startIcon={massDeployBusy ? <CircularProgress size={16} color="inherit" /> : null}
+            >
+              {massDeployBusy ? (massDeployDryRun ? "Starting dry-run..." : "Starting deploy...") : massDeployDryRun ? "Preview (dry-run)" : "Run deploy"}
             </Button>
           </Box>
         </Stack>
@@ -2104,6 +2203,7 @@ export default function ThunderdeployPage() {
             <Stack spacing={2}>
               {renderProviderHealthAlert()}
               {renderProviderBootstrapCard()}
+              {renderMassDeployCard()}
               <TenantProvisioningForm
                 serviceAccount={globalServiceAccountFile}
                 customerServiceAccount={globalCustomerServiceAccountFile}
