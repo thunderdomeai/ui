@@ -935,7 +935,6 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
         "steps": [clone_step, bootstrap_step],
         "timeout": "1800s",
         "logsBucket": logs_bucket,
-        "options": {"substitutionOption": "ALLOW_LOOSE"},
         "tags": ["bootstrap-provider", "unified-ui"],
     }
     if sa_email:
@@ -1074,7 +1073,6 @@ async def thunderdeploy_deploy_agents(request: Request) -> JSONResponse:
         "steps": [clone_step, deploy_step],
         "timeout": "3600s",
         "logsBucket": logs_bucket,
-        "options": {"substitutionOption": "ALLOW_LOOSE"},
         "tags": ["deploy-agents", "unified-ui"],
     }
     if build_sa_email:
