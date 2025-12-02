@@ -47,13 +47,13 @@ const drawerWidth = 260;
 
 const navItems = [
   { label: "Overview", path: "/", icon: <DashboardIcon /> },
+  { label: "Onboarding", path: "/onboarding", icon: <SettingsIcon /> },
+  { label: "Credentials", path: "/credentials", icon: <SecurityIcon /> },
+  { label: "Priming", path: "/priming", icon: <StorageIcon /> },
   { label: "Provider Setup", path: "/provider-setup", icon: <BuildIcon /> },
   { label: "Tenant Setup", path: "/tenant-setup", icon: <CloudQueueIcon /> },
-  { label: "Onboarding", path: "/onboarding", icon: <SettingsIcon /> },
-  { label: "Permissions", path: "/permissions", icon: <SecurityIcon /> },
-  { label: "Priming", path: "/priming", icon: <StorageIcon /> },
-  { label: "Credentials", path: "/credentials", icon: <SecurityIcon /> },
   { label: "Deploy", path: "/deploy", icon: <CloudUploadIcon /> },
+  { label: "Permissions", path: "/permissions", icon: <SecurityIcon /> },
   { label: "AI Configurator", path: "/ai", icon: <AgentIcon /> },
   { label: "Health", path: "/health", icon: <HealthIcon /> },
   { label: "Tenants", path: "/tenants", icon: <HealthIcon /> },

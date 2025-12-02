@@ -187,7 +187,7 @@ export default function ProviderSetupPage() {
         <Stack spacing={2}>
           <Stepper activeStep={step} alternativeLabel>
             <Step>
-              <StepLabel>Credentials & TriggerService</StepLabel>
+              <StepLabel>Priming & credentials</StepLabel>
             </Step>
             <Step>
               <StepLabel>Bootstrap provider project</StepLabel>
@@ -203,11 +203,24 @@ export default function ProviderSetupPage() {
           {step === 0 && (
             <Box>
               <Typography variant="subtitle1" gutterBottom>
-                Step 1: Credentials & TriggerService
+                Step 1: Priming & credentials
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                This step checks that provider (source) and target credentials are selected and primed, and
-                that TriggerService is configured and reachable from this UI.
+                In this step we make sure the provider project is ready to be primed:
+                <br />
+                • The provider (source) credential is selected and verified.
+                <br />
+                • The target (tenant) credential is selected.
+                <br />
+                • TriggerService is configured and reachable.
+                <br />
+                Once these are green, the next step will create or verify:
+                <br />
+                • Logs bucket (e.g. <code>{`{project}`}-thunder-deploy-logs</code>) for Cloud Build and deploy logs.
+                <br />
+                • Dashboard storage bucket (if configured) for job history.
+                <br />
+                • Core Cloud SQL instance and DB used by ThunderdomeCore.
               </Typography>
 
               {providerHealthLoading ? (
@@ -228,7 +241,7 @@ export default function ProviderSetupPage() {
 
               <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>
-                  Checklist
+                  Priming prerequisites
                 </Typography>
                 <ChecklistItem
                   label={`Provider credential selected (${activeSource?.label || "none"})`}
@@ -238,8 +251,14 @@ export default function ProviderSetupPage() {
                   label={`Target credential selected (${activeTarget?.label || "none"})`}
                   done={providerChecklist.targetSelected}
                 />
-                <ChecklistItem label="TriggerService configured" done={providerChecklist.triggerserviceConfigured} />
-                <ChecklistItem label="TriggerService reachable" done={providerChecklist.triggerserviceReachable} />
+                <ChecklistItem
+                  label="TriggerService configured and bound"
+                  done={providerChecklist.triggerserviceConfigured}
+                />
+                <ChecklistItem
+                  label="TriggerService reachable from Unified UI"
+                  done={providerChecklist.triggerserviceReachable}
+                />
               </Paper>
 
               <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
@@ -266,24 +285,31 @@ export default function ProviderSetupPage() {
           {step === 1 && (
             <Box>
               <Typography variant="subtitle1" gutterBottom>
-                Step 2: Bootstrap provider project via Cloud Build
+                Step 2: Bootstrap provider project (priming + core services)
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                This runs <code>make bootstrap-provider</code> in the thunderdeploy repo using the active provider credential.
-                It typically ensures logs buckets, dashboard storage, core Cloud SQL, and TriggerService are ready.
+                This step runs <code>make bootstrap-provider</code> in the thunderdeploy repo using the active provider credential. It:
+                <br />
+                • Ensures the logs bucket (<code>{`gs://${providerProjectId || "project"}-thunder-deploy-logs`}</code>) exists for Cloud Build and deploy logs.
+                <br />
+                • Ensures the job dashboard bucket is created (if enabled) so job history is persisted.
+                <br />
+                • Prepares or verifies the core Cloud SQL instance and provider DB used by ThunderdomeCore.
+                <br />
+                • Deploys or updates TriggerService and any other provider-side control-plane services.
               </Typography>
 
               <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
                 <Typography variant="subtitle2" gutterBottom>
-                  Planned resources for project {providerProjectId || "unknown"}
+                  Priming checklist (provider project {providerProjectId || "unknown"})
                 </Typography>
                 <ChecklistItem
-                  label="Logs bucket for Thunderdeploy (e.g. <project>-thunder-deploy-logs)"
+                  label="Logs bucket created/verified (e.g. <project>-thunder-deploy-logs)"
                   done={!!bootstrapResult}
                 />
-                <ChecklistItem label="Dashboard storage (if configured)" done={!!bootstrapResult} />
-                <ChecklistItem label="Core Cloud SQL instance and DB primed" done={!!bootstrapResult} />
-                <ChecklistItem label="TriggerService deployed/updated" done={!!bootstrapResult} />
+                <ChecklistItem label="Dashboard bucket created/verified (if configured)" done={!!bootstrapResult} />
+                <ChecklistItem label="Core Cloud SQL instance and DB prepared (thunderdome / thunderdomecore_ynv_data)" done={!!bootstrapResult} />
+                <ChecklistItem label="TriggerService and core control-plane services deployed/updated" done={!!bootstrapResult} />
               </Paper>
 
               <Button
@@ -328,7 +354,8 @@ export default function ProviderSetupPage() {
                 Step 3: Deploy core agents (10-agent stack)
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                Submit a dry-run to preview the 10-agent deployment, then run a real deploy (optionally including schedulers).
+                With buckets and databases primed, this step uses the 10-agent deployment script to build and deploy the provider's core agents (ThunderdomeCore, MCP registry, ThunderMCPSQL, broker, WhatsApp handler, etc.).
+                Start with a dry-run to confirm the graph and then run a real deploy (optionally skipping the slow schedulers).
                 This wraps <code>deploy_agents_ordered.py</code> via Cloud Build.
               </Typography>
 
@@ -413,10 +440,22 @@ export default function ProviderSetupPage() {
           {step === 3 && (
             <Box>
               <Typography variant="subtitle1" gutterBottom>
-                Step 4: Review provider health
+                Step 4: Review provider health and endpoints
               </Typography>
               <Typography variant="body2" color="text.secondary" paragraph>
-                Confirm TriggerService and core services are healthy before onboarding tenants. Use the Deploy and Health dashboards for deeper inspection.
+                At this point the provider project should have:
+                <br />
+                • TriggerService deployed and reachable.
+                <br />
+                • Core DB ready and used by ThunderdomeCore.
+                <br />
+                • Core agents deployed (registry, broker, WhatsApp handler, etc.).
+                <br />
+                Use the Health and Tenants views to inspect endpoints:
+                <br />
+                • Health dashboard shows service readiness per tenant.
+                <br />
+                • Tenants & Deployments shows per-service URLs and status via TriggerService.
               </Typography>
 
               {providerHealthLoading ? (
