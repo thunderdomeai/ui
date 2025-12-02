@@ -19,6 +19,21 @@ import SectionCard from "../components/SectionCard.jsx";
 import { useCredentialStore } from "../hooks/credentials/useCredentialStores.js";
 import { fetchProviderHealth, bootstrapProvider, runMassDeploy } from "../utils/api.js";
 
+function formatError(err) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  if (typeof err === "object") {
+    if (err.detail) return formatError(err.detail);
+    if (err.message) return err.message;
+    try {
+      return JSON.stringify(err);
+    } catch (_e) {
+      return String(err);
+    }
+  }
+  return String(err);
+}
+
 function ChecklistItem({ label, done }) {
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
@@ -82,7 +97,7 @@ export default function ProviderSetupPage() {
       const data = await fetchProviderHealth();
       setProviderHealth(data);
     } catch (err) {
-      setProviderHealthError(err.message || "Failed to load provider health.");
+      setProviderHealthError(formatError(err) || "Failed to load provider health.");
     } finally {
       setProviderHealthLoading(false);
     }
@@ -129,7 +144,7 @@ export default function ProviderSetupPage() {
       });
       setBootstrapResult(res);
     } catch (err) {
-      setBootstrapError(err.detail || err.message || "Failed to start provider bootstrap.");
+      setBootstrapError(formatError(err) || "Failed to start provider bootstrap.");
     } finally {
       setBootstrapLoading(false);
     }
@@ -154,7 +169,7 @@ export default function ProviderSetupPage() {
       });
       setMassDeployResult(res);
     } catch (err) {
-      setMassDeployError(err.detail || err.message || "Failed to start mass deploy.");
+      setMassDeployError(formatError(err) || "Failed to start mass deploy.");
     } finally {
       setMassDeployLoading(false);
     }
