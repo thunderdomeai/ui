@@ -928,9 +928,13 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
         ],
     }
 
+    # Derive logs bucket name from project ID (matches thunderdeploy pattern)
+    logs_bucket = f"gs://{project_id}-thunder-deploy-logs"
+
     build_body: Dict[str, Any] = {
         "steps": [clone_step, bootstrap_step],
         "timeout": "1800s",
+        "logsBucket": logs_bucket,
         "options": {"substitutionOption": "ALLOW_LOOSE"},
         "tags": ["bootstrap-provider", "unified-ui"],
     }
@@ -1063,9 +1067,13 @@ async def thunderdeploy_deploy_agents(request: Request) -> JSONResponse:
         "args": ["-c", deploy_command],
     }
 
+    # Derive logs bucket name from project ID (matches thunderdeploy pattern)
+    logs_bucket = f"gs://{build_project_id}-thunder-deploy-logs"
+
     build_body: Dict[str, Any] = {
         "steps": [clone_step, deploy_step],
         "timeout": "3600s",
+        "logsBucket": logs_bucket,
         "options": {"substitutionOption": "ALLOW_LOOSE"},
         "tags": ["deploy-agents", "unified-ui"],
     }
