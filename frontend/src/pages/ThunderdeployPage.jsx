@@ -44,6 +44,7 @@ import {
   bootstrapProvider,
   validateBucketName,
   runMassDeploy,
+  validateSqlDatabase,
 } from "../utils/api.js";
 
 const defaultGithubToken =
@@ -87,7 +88,7 @@ const PROVIDER_REGION_OPTIONS = [
 ];
 
 // ----- Validation & Helper Functions (ellipsis for brevity) -----
-function validateBucketName(name) {
+function validateBucketNameSyntax(name) {
   if (!name) return "Bucket name cannot be empty.";
   if (name.length < 3 || name.length > 63)
     return "Bucket name must be between 3 and 63 characters.";
@@ -167,35 +168,8 @@ async function checkBucketAvailability(bucketName, serviceAccount) {
     return { status: "error", message: `Unexpected error (status ${response.status}).` };
   } catch (error) { console.error("Bucket validation error:", error); return { status: "error", message: "Failed to validate bucket name." }; }
 }
-const SQLADMIN_BASE_URL = "https://sqladmin.googleapis.com/sql/v1beta4";
 // Use the backend proxy to the agent catalog to avoid CORS/HTML fallbacks in Cloud Run.
 const AGENT_REGISTRY_BASE_URL = "/api/agent-catalog";
-async function checkCloudSqlInstanceAndDb(projectId, instanceName, dbName, serviceAccount) {
-  let token;
-  try { token = await getAccessTokenFromServiceAccount(serviceAccount, GOOGLE_CLOUD_SCOPES.CLOUD_PLATFORM); }
-  catch (error) { console.error("Error generating token for Cloud SQL:", error); return { instanceMsg: "Failed to generate token for Cloud SQL check.", dbMsg: "" }; }
-  const instanceUrl = `${SQLADMIN_BASE_URL}/projects/${projectId}/instances/${instanceName}`;
-  let instanceMsg = ""; let instanceExists = false;
-  try {
-    const resp = await fetch(instanceUrl, { headers: { Authorization: `Bearer ${token}` } });
-    if (resp.status === 200) { instanceMsg = `Instance '${instanceName}' found.`; instanceExists = true; }
-    else if (resp.status === 404) { instanceMsg = `Instance '${instanceName}' not found (will be created).`; }
-    else if (resp.status === 403) { instanceMsg = `403: Insufficient permission to check instance '${instanceName}'.`; }
-    else { instanceMsg = `Unexpected error (status ${resp.status}) checking instance.`; }
-  } catch (error) { console.error("Error checking Cloud SQL instance:", error); instanceMsg = "Error while checking instance (network or token issue)."; }
-  let dbMsg = "";
-  if (instanceExists && dbName) {
-    const dbUrl = `${SQLADMIN_BASE_URL}/projects/${projectId}/instances/${instanceName}/databases/${dbName}`;
-    try {
-      const dbResp = await fetch(dbUrl, { headers: { Authorization: `Bearer ${token}` } });
-      if (dbResp.status === 200) { dbMsg = `Database '${dbName}' found in instance '${instanceName}'.`; }
-      else if (dbResp.status === 404) { dbMsg = `Database '${dbName}' not found (will be created).`; }
-      else if (dbResp.status === 403) { dbMsg = `403: Insufficient permission to check database '${dbName}'.`; }
-      else { dbMsg = `Unexpected error (status ${dbResp.status}) checking database.`; }
-    } catch (error) { console.error("Error checking Cloud SQL database:", error); dbMsg = "Error while checking database (network or token issue)."; }
-  }
-  return { instanceMsg, dbMsg };
-}
 
 const POLLING_INTERVAL = 10000; // 10 seconds
 const WAVES = [1, 2, 3];
@@ -1330,7 +1304,7 @@ export default function ThunderdeployPage() {
     if (config.buckets && config.buckets.length > 0) {
       hasBucketsToCheck = true;
       for (const bucket of config.buckets) {
-        const localError = validateBucketName(bucket);
+        const localError = validateBucketNameSyntax(bucket);
         if (localError) {
           messages[bucket] = localError;
           continue;
@@ -1343,7 +1317,7 @@ export default function ThunderdeployPage() {
       for (const mount of config.bucket_mounts) {
         if (mount.bucket) {
           hasBucketsToCheck = true;
-          const localError = validateBucketName(mount.bucket);
+          const localError = validateBucketNameSyntax(mount.bucket);
           if (localError) {
             messages[mount.bucket] = `Mount Bucket: ${localError}`;
             continue;
@@ -1370,15 +1344,6 @@ export default function ThunderdeployPage() {
       alert(`Database connection is not enabled for instance: ${instance.id}.`);
       return;
     }
-    if (!globalCustomerServiceAccountFile) {
-      alert("Please upload the Target Project customer_serviceaccount.json for DB validation.");
-      return;
-    }
-    const projectId = globalCustomerServiceAccountFile.project_id;
-    if (!projectId) {
-      alert("Project ID not found in the customer_serviceaccount.json.");
-      return;
-    }
     const instanceName = config.database_instance;
     const dbName = config.database_name;
     const errors = [];
@@ -1394,13 +1359,24 @@ export default function ThunderdeployPage() {
       alert(`Validation Errors for ${instance.id}:\n${errors.join("\n")}`);
       return;
     }
-    const { instanceMsg, dbMsg } = await checkCloudSqlInstanceAndDb(
-      projectId,
-      instanceName,
-      dbName,
-      globalCustomerServiceAccountFile
-    );
-    alert(`DB Validation for ${instance.id}:\nInstance Check: ${instanceMsg}\nDatabase Check: ${dbMsg}`);
+    try {
+      const result = await validateSqlDatabase(instanceName, dbName, "target");
+      const status = result?.status || "unknown";
+      const message = result?.message || status;
+      const composed =
+        status === "exists"
+          ? `Database '${dbName}' exists in instance '${instanceName}'.`
+          : status === "missing"
+          ? `Database '${dbName}' does not exist in instance '${instanceName}' and can be created.`
+          : status === "instance_not_found"
+          ? `Instance '${instanceName}' was not found.`
+          : message;
+      alert(`Database Validation for ${instance.id}:\n${composed}`);
+    } catch (error) {
+      console.error("SQL validation failed", error);
+      const detail = error?.detail || error?.message || "Unknown error.";
+      alert(`Failed to validate database for ${instance.id}:\n${detail}`);
+    }
   };
 
   const generateFinalJSON = (instanceIdsOverride = null) => {
