@@ -1507,6 +1507,21 @@ def _maybe_set_env_or_extra(env: Dict[str, Any], key: str, value: Any) -> None:
         _set_extra_env(env, key, value)
 
 
+def _apply_postgres_env(env: Dict[str, Any], connection_name: str, db_name: str, db_username: Optional[str], db_password: Optional[str], canonical_port: Optional[Any] = None) -> None:
+    """
+    Ensure POSTGRES_* env vars are set consistently for Cloud SQL sockets without overwriting non-placeholder values.
+    """
+    db_socket = f"/cloudsql/{connection_name}"
+    _maybe_set_env_or_extra(env, "POSTGRES_HOST", db_socket)
+    _maybe_set_env_or_extra(env, "POSTGRES_DB", db_name)
+    if db_username:
+        _maybe_set_env_or_extra(env, "POSTGRES_USER", db_username)
+    if db_password:
+        _maybe_set_env_or_extra(env, "POSTGRES_PASSWORD", db_password)
+    default_port = str(canonical_port) if canonical_port else "5432"
+    _maybe_set_env_or_extra(env, "POSTGRES_PORT", default_port)
+
+
 def _collect_placeholder_paths(node: Any, path: list, out: list) -> None:
     """
     Walks the structure and collects critical placeholders.
@@ -1614,16 +1629,10 @@ def finalize_tenant_userrequirements(
                 _maybe_set_env_or_extra(env, "DATABASE_URL", database_url)
                 _maybe_set_env_or_extra(env, "DB_HOST", db_socket)
                 _maybe_set_env_or_extra(env, "DB_CONNECTION", db_socket)
-                _maybe_set_env_or_extra(env, "POSTGRES_DB", db_name)
-                _maybe_set_env_or_extra(env, "POSTGRES_USER", db_username)
-                _maybe_set_env_or_extra(env, "POSTGRES_PASSWORD", db_password)
-                _maybe_set_env_or_extra(env, "POSTGRES_HOST", db_socket)
-
                 canonical_port = None
                 if canonical_env:
                     canonical_port = _get_extra_env(canonical_env, "POSTGRES_PORT") or canonical_env.get("POSTGRES_PORT")
-                default_port = str(canonical_port) if canonical_port else "5432"
-                _maybe_set_env_or_extra(env, "POSTGRES_PORT", default_port)
+                _apply_postgres_env(env, db_instance, db_name, db_username, db_password, canonical_port)
 
             canonical_max_tokens = None
             if canonical_env:
