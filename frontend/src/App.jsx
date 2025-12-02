@@ -38,12 +38,14 @@ import CredentialsPage from "./pages/CredentialsPage.jsx";
 import ActiveDeploymentsPage from "./pages/ActiveDeploymentsPage.jsx";
 import TenantDetailPage from "./pages/TenantDetailPage.jsx";
 import ThunderdeployPage from "./pages/ThunderdeployPage.jsx";
+import SetupWizardPage from "./pages/SetupWizardPage.jsx";
 import { useConfig } from "./hooks/useConfig.js";
 
 const drawerWidth = 260;
 
 const navItems = [
   { label: "Overview", path: "/", icon: <DashboardIcon /> },
+  { label: "Setup Wizard", path: "/wizard", icon: <BuildIcon /> },
   { label: "Onboarding", path: "/onboarding", icon: <SettingsIcon /> },
   { label: "Permissions", path: "/permissions", icon: <SecurityIcon /> },
   { label: "Priming", path: "/priming", icon: <StorageIcon /> },
@@ -181,6 +183,7 @@ export default function App() {
       <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, mt: 8, overflow: "auto" }}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/wizard" element={<SetupWizardPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/priming" element={<PrimingPage />} />
