@@ -436,6 +436,8 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         region,
         db_alias: dbAliasLabel,
         users: formData.users,
+        tenant_db_name: dbName,
+        tenant_db_instance: connectionName,
       };
 
       let baseUserrequirements = null;
@@ -488,6 +490,9 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
         region,
         database_instance: connectionName,
         database_name: dbName,
+        tenant_db_instance: connectionName,
+        tenant_db_name: dbName,
+        db_alias: dbAliasLabel,
       };
 
       const finalizeResp = await finalizeTenantStack({
@@ -570,6 +575,9 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
       </Typography>
       <Typography variant="body2" color="text.secondary" paragraph>
         Deploy a full Agent One tenant stack (10 agents) for a new tenant, using the standard template. This includes core agents, MCP/broker wiring, and database configuration.
+      </Typography>
+      <Typography variant="body2" color="text.secondary" paragraph>
+        Database layout: the provider uses a shared Cloud SQL instance <strong>thunderdome</strong> in project <strong>thunderdeployone</strong> with its own core database <strong>thunderdomecore_ynv_data</strong>. Each tenant gets a separate database in the same instance (for example <code>thunderdeploycustomer_data</code>), which you select or create below.
       </Typography>
 
       <Box sx={{ mb: 2 }}>
@@ -673,6 +681,14 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
             helperText="GCP Region (default: us-central1)"
           />
         </Grid>
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" fontWeight={600}>
+            Database configuration
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Use the shared provider instance (e.g. <code>thunderdome</code>) and pick a tenant database. Existing databases will be reused; new names will be created on first deploy.
+          </Typography>
+        </Grid>
         <Grid item xs={12} sm={6}>
           <Autocomplete
             options={sqlInstances}
@@ -697,7 +713,10 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
                 {...params}
                 fullWidth
                 label="Cloud SQL Instance"
-                helperText={sqlInstancesError || "Select an existing Cloud SQL instance in the target project."}
+                helperText={
+                  sqlInstancesError ||
+                  "Select the Cloud SQL instance that hosts provider and tenant databases (for thunderdeployone, use thunderdome)."
+                }
               />
             )}
           />
@@ -718,11 +737,11 @@ export default function TenantProvisioningForm({ serviceAccount, customerService
               <TextField
                 {...params}
                 fullWidth
-                label="Database"
+                label="Tenant Database"
                 helperText={
                   sqlDatabasesError ||
                   dbValidation.message ||
-                  "Select or enter a database in the chosen instance."
+                  "Select an existing tenant database or type a new name; new names will be created if missing."
                 }
               />
             )}
