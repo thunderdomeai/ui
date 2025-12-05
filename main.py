@@ -912,10 +912,19 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
 
     project_id, access_token, sa_email = _get_source_build_token_and_project()
 
+    # Use GitHub PAT for private repo access (optional for public repos)
+    authenticated_url = repo_url
+    if DEFAULT_GITHUB_TOKEN and "github.com" in repo_url:
+        # Inject GitHub PAT into HTTPS URL for authentication
+        authenticated_url = repo_url.replace("https://github.com", f"https://{DEFAULT_GITHUB_TOKEN}@github.com")
+        logger.info("Using GitHub PAT for authenticated clone")
+    else:
+        logger.warning("No GitHub token configured - attempting unauthenticated clone (will fail for private repos)")
+
     clone_step = {
         "name": "gcr.io/cloud-builders/git",
         "entrypoint": "/bin/sh",
-        "args": ["-c", f"git clone --depth 1 --branch {branch} {repo_url}"],
+        "args": ["-c", f"git clone --depth 1 --branch {branch} {authenticated_url}"],
     }
     bootstrap_step = {
         "name": "gcr.io/cloud-builders/gcloud",
@@ -924,7 +933,9 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
         "env": [f"PROJECT_ID={project_id}", f"REGION={region}", "DEBIAN_FRONTEND=noninteractive"],
         "args": [
             "-c",
-            "apt-get update && apt-get install -y make && PROJECT_ID=${PROJECT_ID} REGION=${REGION} make bootstrap-provider",
+            "apt-get update && apt-get install -y make python3-pip && "
+            "pip3 install --no-cache-dir pyyaml google-cloud-storage google-cloud-tasks google-auth && "
+            "make bootstrap-provider",
         ],
     }
 
@@ -938,7 +949,8 @@ async def bootstrap_provider(request: Request) -> JSONResponse:
         "tags": ["bootstrap-provider", "unified-ui"],
     }
     if sa_email:
-        build_body["serviceAccount"] = sa_email
+        # Cloud Build requires full resource name format
+        build_body["serviceAccount"] = f"projects/{project_id}/serviceAccounts/{sa_email}"
 
     url = f"https://cloudbuild.googleapis.com/v1/projects/{project_id}/builds"
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -1023,10 +1035,19 @@ async def thunderdeploy_deploy_agents(request: Request) -> JSONResponse:
     runner_sa_b64 = base64.b64encode(json.dumps(runner_sa_info).encode("utf-8")).decode("utf-8")
     customer_sa_b64 = base64.b64encode(json.dumps(customer_sa_info).encode("utf-8")).decode("utf-8")
 
+    # Use GitHub PAT for private repo access (optional for public repos)
+    authenticated_url = repo_url
+    if DEFAULT_GITHUB_TOKEN and "github.com" in repo_url:
+        # Inject GitHub PAT into HTTPS URL for authentication
+        authenticated_url = repo_url.replace("https://github.com", f"https://{DEFAULT_GITHUB_TOKEN}@github.com")
+        logger.info("Using GitHub PAT for authenticated clone")
+    else:
+        logger.warning("No GitHub token configured - attempting unauthenticated clone (will fail for private repos)")
+
     clone_step = {
         "name": "gcr.io/cloud-builders/git",
         "entrypoint": "/bin/sh",
-        "args": ["-c", f"git clone --depth 1 --branch {branch} {repo_url}"],
+        "args": ["-c", f"git clone --depth 1 --branch {branch} {authenticated_url}"],
     }
 
     deploy_cmd = (
@@ -1076,7 +1097,8 @@ async def thunderdeploy_deploy_agents(request: Request) -> JSONResponse:
         "tags": ["deploy-agents", "unified-ui"],
     }
     if build_sa_email:
-        build_body["serviceAccount"] = build_sa_email
+        # Cloud Build requires full resource name format
+        build_body["serviceAccount"] = f"projects/{build_project_id}/serviceAccounts/{build_sa_email}"
 
     url = f"https://cloudbuild.googleapis.com/v1/projects/{build_project_id}/builds"
     headers = {"Authorization": f"Bearer {access_token}"}

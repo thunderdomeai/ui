@@ -17,7 +17,7 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import PageLayout from "../components/PageLayout.jsx";
 import SectionCard from "../components/SectionCard.jsx";
 import { useCredentialStore } from "../hooks/credentials/useCredentialStores.js";
-import { fetchProviderHealth, bootstrapProvider, runMassDeploy } from "../utils/api.js";
+import { fetchProviderHealth, bootstrapProvider, runMassDeploy, getPrimeStatus } from "../utils/api.js";
 
 function formatError(err) {
   if (!err) return "Unknown error";
@@ -72,6 +72,10 @@ export default function ProviderSetupPage() {
   const [massDeployDryRun, setMassDeployDryRun] = useState(true);
   const [massDeployIncludeSchedulers, setMassDeployIncludeSchedulers] = useState(false);
 
+  const [primeStatus, setPrimeStatus] = useState(null);
+  const [primeStatusLoading, setPrimeStatusLoading] = useState(false);
+  const [primeStatusError, setPrimeStatusError] = useState("");
+
   const activeSource = useMemo(
     () => sourceStore.entries.find((entry) => entry.id === sourceStore.selectedId) ?? null,
     [sourceStore.entries, sourceStore.selectedId],
@@ -81,14 +85,63 @@ export default function ProviderSetupPage() {
     [targetStore.entries, targetStore.selectedId],
   );
 
-  const providerProjectId = useMemo(
-    () =>
-      activeSource?.projectId ||
-      activeSource?.credential?.project_id ||
-      providerHealth?.source_credential?.projectId ||
-      "",
-    [activeSource, providerHealth],
-  );
+	  const providerProjectId = useMemo(
+	    () =>
+	      activeSource?.projectId ||
+	      activeSource?.credential?.project_id ||
+	      providerHealth?.source_credential?.projectId ||
+	      "",
+	    [activeSource, providerHealth],
+	  );
+	
+	  const providerRegion = useMemo(
+	    () => providerHealth?.triggerservice?.region || "us-central1",
+	    [providerHealth],
+	  );
+	
+	  const providerCredentialB64 = useMemo(() => {
+	    const credential = activeSource?.credential;
+	    if (!credential) return "";
+	    try {
+	      return btoa(JSON.stringify(credential));
+	    } catch {
+	      return "";
+	    }
+	  }, [activeSource]);
+	
+	  const refreshPrimeStatus = useCallback(async () => {
+	    if (!providerCredentialB64 || !providerProjectId) {
+	      setPrimeStatus(null);
+	      setPrimeStatusError("");
+	      return;
+	    }
+	    setPrimeStatusLoading(true);
+	    setPrimeStatusError("");
+	    try {
+	      const data = await getPrimeStatus({
+	        credentialB64: providerCredentialB64,
+	        projectId: providerProjectId,
+	        region: providerRegion,
+	      });
+	      setPrimeStatus(data);
+	    } catch (err) {
+	      let errorMsg = formatError(err) || "Failed to load provider readiness.";
+	      if (err && typeof err === "object") {
+	        const status = err.status;
+	        if (status === 403) {
+	          errorMsg =
+	            "Permission denied. Ensure the provider credential has IAM permissions to list buckets, queues, jobs, and scheduler.";
+	        } else if (status === 404) {
+	          errorMsg = "TriggerService prime-status endpoint not found. Ensure TriggerService is deployed.";
+	        } else if (status === 401) {
+	          errorMsg = "Authentication failed. Re-verify the provider (source) credential.";
+	        }
+	      }
+	      setPrimeStatusError(errorMsg);
+	    } finally {
+	      setPrimeStatusLoading(false);
+	    }
+	  }, [providerCredentialB64, providerProjectId, providerRegion]);
 
   const refreshProviderHealth = useCallback(async () => {
     setProviderHealthLoading(true);
@@ -103,9 +156,21 @@ export default function ProviderSetupPage() {
     }
   }, []);
 
-  useEffect(() => {
-    refreshProviderHealth();
-  }, [refreshProviderHealth]);
+	  useEffect(() => {
+	    refreshProviderHealth();
+	  }, [refreshProviderHealth]);
+	
+	  useEffect(() => {
+	    if (step === 3) {
+	      refreshPrimeStatus();
+	    }
+	  }, [step, refreshPrimeStatus]);
+	
+	  useEffect(() => {
+	    if (bootstrapResult && step === 3) {
+	      refreshPrimeStatus();
+	    }
+	  }, [bootstrapResult, step, refreshPrimeStatus]);
 
   const overallStatus = (providerHealth?.overall_status || "").toLowerCase();
   const providerBlocked = overallStatus === "error";
@@ -128,6 +193,33 @@ export default function ProviderSetupPage() {
   const massDeployResultIsDryRun = !!(massDeployResult?.dryRun ?? massDeployResult?.dry_run);
   const previewDone = !!massDeployResult && massDeployResultIsDryRun;
   const deployDone = !!massDeployResult && !massDeployResultIsDryRun;
+
+  const readinessSummary = useMemo(() => {
+    if (!primeStatus) return null;
+    const missingBuckets = primeStatus.missing_bucket_count ?? 0;
+    const missingServiceAccounts = primeStatus.missing_service_account_count ?? 0;
+    const missingQueues = primeStatus.missing_task_queue_count ?? 0;
+    const missingJobs = primeStatus.missing_scheduler_job_count ?? 0;
+    const errorBuckets = primeStatus.error_bucket_count ?? 0;
+    const errorServiceAccounts = primeStatus.error_service_account_count ?? 0;
+    const errorQueues = primeStatus.error_task_queue_count ?? 0;
+    const errorJobs = primeStatus.error_scheduler_job_count ?? 0;
+    const hasErrors = errorBuckets > 0 || errorServiceAccounts > 0 || errorQueues > 0 || errorJobs > 0;
+    const allOk =
+      !hasErrors && missingBuckets === 0 && missingServiceAccounts === 0 && missingQueues === 0 && missingJobs === 0;
+    return {
+      missingBuckets,
+      missingServiceAccounts,
+      missingQueues,
+      missingJobs,
+      errorBuckets,
+      errorServiceAccounts,
+      errorQueues,
+      errorJobs,
+      hasErrors,
+      allOk,
+    };
+  }, [primeStatus]);
 
   const handleRunBootstrap = async () => {
     if (!providerProjectId) {
@@ -480,6 +572,48 @@ export default function ProviderSetupPage() {
                 <ChecklistItem label="Target credential present" done={!!activeTarget} />
               </Paper>
 
+              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Provider readiness (buckets, queues, jobs, IAM)
+                </Typography>
+                {primeStatusLoading ? (
+                  <Alert severity="info">Checking provider resources…</Alert>
+                ) : primeStatusError ? (
+                  <Alert severity="warning">{primeStatusError}</Alert>
+                ) : !providerProjectId || !activeSource ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Select an active provider (source) credential to run readiness checks.
+                  </Typography>
+                ) : primeStatus && readinessSummary ? (
+                  <>
+                    <ChecklistItem
+                      label={`Buckets ready (missing: ${readinessSummary.missingBuckets}, errors: ${readinessSummary.errorBuckets})`}
+                      done={readinessSummary.missingBuckets === 0 && readinessSummary.errorBuckets === 0}
+                    />
+                    <ChecklistItem
+                      label={`Service accounts & roles ready (missing: ${readinessSummary.missingServiceAccounts}, errors: ${readinessSummary.errorServiceAccounts})`}
+                      done={readinessSummary.missingServiceAccounts === 0 && readinessSummary.errorServiceAccounts === 0}
+                    />
+                    <ChecklistItem
+                      label={`Cloud Tasks queues ready (missing: ${readinessSummary.missingQueues}, errors: ${readinessSummary.errorQueues})`}
+                      done={readinessSummary.missingQueues === 0 && readinessSummary.errorQueues === 0}
+                    />
+                    <ChecklistItem
+                      label={`Cloud Scheduler jobs ready (missing: ${readinessSummary.missingJobs}, errors: ${readinessSummary.errorJobs})`}
+                      done={readinessSummary.missingJobs === 0 && readinessSummary.errorJobs === 0}
+                    />
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                      Source: TriggerService <code>prime-status</code> for project {primeStatus.project_id} in region{" "}
+                      {primeStatus.region}.
+                    </Typography>
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Readiness checks have not run yet.
+                  </Typography>
+                )}
+              </Paper>
+
               <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }} paragraph>
                 Next steps: open the <Link href="/deploy">Deploy</Link> and <Link href="/health">Health</Link> pages to monitor services,
                 or proceed to <Link href="/tenant-setup">Tenant Setup</Link> to onboard customers.
@@ -489,10 +623,20 @@ export default function ProviderSetupPage() {
                 <Button variant="outlined" onClick={() => setStep(2)}>
                   Back
                 </Button>
-                <Button variant="contained" onClick={refreshProviderHealth}>
-                  Refresh health
-                </Button>
-              </Stack>
+	                <Stack direction="row" spacing={1}>
+	                  <Button variant="outlined" onClick={refreshProviderHealth}>
+	                    Refresh health
+	                  </Button>
+	                  <Button
+	                    variant="contained"
+	                    onClick={refreshPrimeStatus}
+	                    disabled={primeStatusLoading}
+	                    aria-label="Refresh provider readiness checks for buckets, queues, service accounts, and Cloud Scheduler jobs"
+	                  >
+	                    {primeStatusLoading ? "Checking readiness…" : "Refresh readiness"}
+	                  </Button>
+	                </Stack>
+	              </Stack>
             </Box>
           )}
         </Stack>
