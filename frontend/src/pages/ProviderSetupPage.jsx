@@ -10,6 +10,7 @@ import {
   Step,
   StepLabel,
   Stepper,
+  TextField,
   Typography,
 } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
@@ -17,7 +18,7 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import PageLayout from "../components/PageLayout.jsx";
 import SectionCard from "../components/SectionCard.jsx";
 import { useCredentialStore } from "../hooks/credentials/useCredentialStores.js";
-import { fetchProviderHealth, bootstrapProvider, runMassDeploy, getPrimeStatus } from "../utils/api.js";
+import { fetchProviderHealth, bootstrapProvider, runMassDeploy, getPrimeStatus, validateSqlDatabase } from "../utils/api.js";
 
 function formatError(err) {
   if (!err) return "Unknown error";
@@ -76,6 +77,12 @@ export default function ProviderSetupPage() {
   const [primeStatusLoading, setPrimeStatusLoading] = useState(false);
   const [primeStatusError, setPrimeStatusError] = useState("");
 
+  const [dbInstance, setDbInstance] = useState("thunderdome");
+  const [dbDatabase, setDbDatabase] = useState("thunderdomecore_ynv_data");
+  const [dbValidation, setDbValidation] = useState(null);
+  const [dbValidationLoading, setDbValidationLoading] = useState(false);
+  const [dbValidationError, setDbValidationError] = useState("");
+
   const activeSource = useMemo(
     () => sourceStore.entries.find((entry) => entry.id === sourceStore.selectedId) ?? null,
     [sourceStore.entries, sourceStore.selectedId],
@@ -85,63 +92,92 @@ export default function ProviderSetupPage() {
     [targetStore.entries, targetStore.selectedId],
   );
 
-	  const providerProjectId = useMemo(
-	    () =>
-	      activeSource?.projectId ||
-	      activeSource?.credential?.project_id ||
-	      providerHealth?.source_credential?.projectId ||
-	      "",
-	    [activeSource, providerHealth],
-	  );
-	
-	  const providerRegion = useMemo(
-	    () => providerHealth?.triggerservice?.region || "us-central1",
-	    [providerHealth],
-	  );
-	
-	  const providerCredentialB64 = useMemo(() => {
-	    const credential = activeSource?.credential;
-	    if (!credential) return "";
-	    try {
-	      return btoa(JSON.stringify(credential));
-	    } catch {
-	      return "";
-	    }
-	  }, [activeSource]);
-	
-	  const refreshPrimeStatus = useCallback(async () => {
-	    if (!providerCredentialB64 || !providerProjectId) {
-	      setPrimeStatus(null);
-	      setPrimeStatusError("");
-	      return;
-	    }
-	    setPrimeStatusLoading(true);
-	    setPrimeStatusError("");
-	    try {
-	      const data = await getPrimeStatus({
-	        credentialB64: providerCredentialB64,
-	        projectId: providerProjectId,
-	        region: providerRegion,
-	      });
-	      setPrimeStatus(data);
-	    } catch (err) {
-	      let errorMsg = formatError(err) || "Failed to load provider readiness.";
-	      if (err && typeof err === "object") {
-	        const status = err.status;
-	        if (status === 403) {
-	          errorMsg =
-	            "Permission denied. Ensure the provider credential has IAM permissions to list buckets, queues, jobs, and scheduler.";
-	        } else if (status === 404) {
-	          errorMsg = "TriggerService prime-status endpoint not found. Ensure TriggerService is deployed.";
-	        } else if (status === 401) {
-	          errorMsg = "Authentication failed. Re-verify the provider (source) credential.";
-	        }
-	      }
-	      setPrimeStatusError(errorMsg);
-	    } finally {
-	      setPrimeStatusLoading(false);
-	    }
-	  }, [providerCredentialB64, providerProjectId, providerRegion]);
+  const providerProjectId = useMemo(
+    () =>
+      activeSource?.projectId ||
+      activeSource?.credential?.project_id ||
+      providerHealth?.source_credential?.projectId ||
+      "",
+    [activeSource, providerHealth],
+  );
+
+  const providerRegion = useMemo(
+    () => providerHealth?.triggerservice?.region || "us-central1",
+    [providerHealth],
+  );
+
+  const providerCredentialB64 = useMemo(() => {
+    const credential = activeSource?.credential;
+    if (!credential) return "";
+    try {
+      return btoa(JSON.stringify(credential));
+    } catch {
+      return "";
+    }
+  }, [activeSource]);
+
+  const refreshPrimeStatus = useCallback(async () => {
+    if (!providerCredentialB64 || !providerProjectId) {
+      setPrimeStatus(null);
+      setPrimeStatusError("");
+      return;
+    }
+    setPrimeStatusLoading(true);
+    setPrimeStatusError("");
+    try {
+      const data = await getPrimeStatus({
+        credentialB64: providerCredentialB64,
+        projectId: providerProjectId,
+        region: providerRegion,
+      });
+      setPrimeStatus(data);
+    } catch (err) {
+      let errorMsg = formatError(err) || "Failed to load provider readiness.";
+      if (err && typeof err === "object") {
+        const status = err.status;
+        if (status === 403) {
+          errorMsg =
+            "Permission denied. Ensure the provider credential has IAM permissions to list buckets, queues, jobs, and scheduler.";
+        } else if (status === 404) {
+          errorMsg = "TriggerService prime-status endpoint not found. Ensure TriggerService is deployed.";
+        } else if (status === 401) {
+          errorMsg = "Authentication failed. Re-verify the provider (source) credential.";
+        }
+      }
+      setPrimeStatusError(errorMsg);
+    } finally {
+      setPrimeStatusLoading(false);
+    }
+  }, [providerCredentialB64, providerProjectId, providerRegion]);
+
+  const checkDbReadiness = useCallback(async () => {
+    if (!dbInstance || !dbDatabase) {
+      setDbValidation(null);
+      setDbValidationError("");
+      return;
+    }
+    setDbValidationLoading(true);
+    setDbValidationError("");
+    try {
+      const data = await validateSqlDatabase(dbInstance, dbDatabase, "source");
+      setDbValidation(data);
+    } catch (err) {
+      let errorMsg = formatError(err) || "Failed to validate provider database.";
+      if (err && typeof err === "object") {
+        const status = err.status;
+        if (status === 403) {
+          errorMsg = "Permission denied. Ensure the provider credential has Cloud SQL Admin permissions.";
+        } else if (status === 502) {
+          errorMsg = "Failed to contact Cloud SQL Admin API. Check network/permissions.";
+        } else if (status === 400) {
+          errorMsg = "No provider (source) credential selected. Select a provider credential first.";
+        }
+      }
+      setDbValidationError(errorMsg);
+    } finally {
+      setDbValidationLoading(false);
+    }
+  }, [dbInstance, dbDatabase]);
 
   const refreshProviderHealth = useCallback(async () => {
     setProviderHealthLoading(true);
@@ -156,21 +192,27 @@ export default function ProviderSetupPage() {
     }
   }, []);
 
-	  useEffect(() => {
-	    refreshProviderHealth();
-	  }, [refreshProviderHealth]);
-	
-	  useEffect(() => {
-	    if (step === 3) {
-	      refreshPrimeStatus();
-	    }
-	  }, [step, refreshPrimeStatus]);
-	
-	  useEffect(() => {
-	    if (bootstrapResult && step === 3) {
-	      refreshPrimeStatus();
-	    }
-	  }, [bootstrapResult, step, refreshPrimeStatus]);
+  useEffect(() => {
+    refreshProviderHealth();
+  }, [refreshProviderHealth]);
+
+  useEffect(() => {
+    if (step === 3) {
+      refreshPrimeStatus();
+    }
+  }, [step, refreshPrimeStatus]);
+
+  useEffect(() => {
+    if (bootstrapResult && step === 3) {
+      refreshPrimeStatus();
+    }
+  }, [bootstrapResult, step, refreshPrimeStatus]);
+
+  useEffect(() => {
+    if (step === 3 && dbInstance && dbDatabase) {
+      checkDbReadiness();
+    }
+  }, [step, checkDbReadiness]);
 
   const overallStatus = (providerHealth?.overall_status || "").toLowerCase();
   const providerBlocked = overallStatus === "error";
@@ -497,8 +539,8 @@ export default function ProviderSetupPage() {
                     ? "Starting dry-run…"
                     : "Starting deploy…"
                   : massDeployDryRun
-                  ? "Preview (dry-run)"
-                  : "Run deploy"}
+                    ? "Preview (dry-run)"
+                    : "Run deploy"}
               </Button>
 
               {massDeployError ? (
@@ -614,6 +656,64 @@ export default function ProviderSetupPage() {
                 )}
               </Paper>
 
+              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Core provider database
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  Verify that the core Cloud SQL database exists and is accessible to the provider credential.
+                </Typography>
+
+                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                  <TextField
+                    label="Instance"
+                    value={dbInstance}
+                    onChange={(e) => setDbInstance(e.target.value)}
+                    size="small"
+                    fullWidth
+                    helperText="Format: instance-name or project:region:instance"
+                    disabled={dbValidationLoading}
+                  />
+                  <TextField
+                    label="Database"
+                    value={dbDatabase}
+                    onChange={(e) => setDbDatabase(e.target.value)}
+                    size="small"
+                    fullWidth
+                    disabled={dbValidationLoading}
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={checkDbReadiness}
+                    disabled={dbValidationLoading || !dbInstance || !dbDatabase}
+                    size="small"
+                    sx={{ minWidth: 100 }}
+                  >
+                    {dbValidationLoading ? "Checking..." : "Check"}
+                  </Button>
+                </Stack>
+
+                {dbValidationLoading ? (
+                  <Alert severity="info">Validating provider database…</Alert>
+                ) : dbValidationError ? (
+                  <Alert severity="warning">{dbValidationError}</Alert>
+                ) : dbValidation ? (
+                  <>
+                    <ChecklistItem
+                      label={`Database ${dbValidation.status === "exists" ? "ready" : dbValidation.status === "instance_not_found" ? "instance not found" : "missing"} (${dbInstance}/${dbDatabase})`}
+                      done={dbValidation.status === "exists"}
+                    />
+                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                      {dbValidation.message}
+                    </Typography>
+                  </>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Click "Check" to validate the database.
+                  </Typography>
+                )}
+              </Paper>
+
               <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }} paragraph>
                 Next steps: open the <Link href="/deploy">Deploy</Link> and <Link href="/health">Health</Link> pages to monitor services,
                 or proceed to <Link href="/tenant-setup">Tenant Setup</Link> to onboard customers.
@@ -623,20 +723,20 @@ export default function ProviderSetupPage() {
                 <Button variant="outlined" onClick={() => setStep(2)}>
                   Back
                 </Button>
-	                <Stack direction="row" spacing={1}>
-	                  <Button variant="outlined" onClick={refreshProviderHealth}>
-	                    Refresh health
-	                  </Button>
-	                  <Button
-	                    variant="contained"
-	                    onClick={refreshPrimeStatus}
-	                    disabled={primeStatusLoading}
-	                    aria-label="Refresh provider readiness checks for buckets, queues, service accounts, and Cloud Scheduler jobs"
-	                  >
-	                    {primeStatusLoading ? "Checking readiness…" : "Refresh readiness"}
-	                  </Button>
-	                </Stack>
-	              </Stack>
+                <Stack direction="row" spacing={1}>
+                  <Button variant="outlined" onClick={refreshProviderHealth}>
+                    Refresh health
+                  </Button>
+                  <Button
+                    variant="contained"
+                    onClick={refreshPrimeStatus}
+                    disabled={primeStatusLoading}
+                    aria-label="Refresh provider readiness checks for buckets, queues, service accounts, and Cloud Scheduler jobs"
+                  >
+                    {primeStatusLoading ? "Checking readiness…" : "Refresh readiness"}
+                  </Button>
+                </Stack>
+              </Stack>
             </Box>
           )}
         </Stack>
