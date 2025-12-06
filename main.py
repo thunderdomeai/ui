@@ -1167,6 +1167,49 @@ async def sql_operation_status(operation_id: str) -> JSONResponse:
     return JSONResponse(result)
 
 
+@app.get("/api/sql/databases-list")
+async def sql_databases_list(instance: str, scope: str = "source") -> JSONResponse:
+    """
+    List all databases in a Cloud SQL instance.
+    """
+    if not instance:
+        raise HTTPException(status_code=400, detail="instance is required.")
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance}/databases"
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL databases list request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        payload = resp.json() if resp.content else {}
+        error_msg = payload.get("error", {}).get("message", resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=error_msg)
+
+    payload = resp.json()
+    databases = []
+    for db in payload.get("items", []):
+        # Filter out system databases
+        name = db.get("name", "")
+        if name not in ("postgres", "cloudsqladmin", "template0", "template1"):
+            databases.append({
+                "name": name,
+                "charset": db.get("charset", ""),
+                "collation": db.get("collation", ""),
+            })
+
+    return JSONResponse({
+        "databases": databases,
+        "instance": instance,
+        "project_id": project_id,
+    })
+
+
 @app.post("/api/sql/databases-create")
 async def sql_databases_create(request: Request) -> JSONResponse:
     """

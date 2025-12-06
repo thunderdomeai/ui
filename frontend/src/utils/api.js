@@ -264,6 +264,10 @@ export async function sqlOperationStatus(operationId) {
   return fetchJson(`/api/sql/operations/${encodeURIComponent(operationId)}`);
 }
 
+export async function sqlDatabasesList(instance, scope = "source") {
+  return fetchJson(`/api/sql/databases-list?instance=${encodeURIComponent(instance)}&scope=${scope}`);
+}
+
 export async function sqlDatabasesCreate({ instance, database, scope = "source" }) {
   return fetchJson("/api/sql/databases-create", {
     method: "POST",

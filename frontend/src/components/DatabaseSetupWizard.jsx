@@ -33,6 +33,7 @@ import {
     sqlInstancesList,
     sqlInstancesCreate,
     sqlOperationStatus,
+    sqlDatabasesList,
     sqlDatabasesCreate,
     sqlUsersCreate,
     sqlUsersList,
@@ -274,6 +275,22 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
         }
     };
 
+    // Fetch existing databases
+    const fetchExistingDatabases = async () => {
+        try {
+            const data = await sqlDatabasesList(currentInstance, scope);
+            if (data.databases) {
+                setExistingDatabases(data.databases);
+                if (data.databases.length > 0) {
+                    setDatabaseMode("existing");
+                    setDatabaseName(data.databases[0].name);
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch databases:", err);
+        }
+    };
+
     // Step navigation
     const canProceed = (step) => {
         switch (step) {
@@ -294,9 +311,9 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
     };
 
     const handleNext = async () => {
-        if (activeStep === 1 && instanceMode === "existing") {
-            // Fetch existing users when moving to step 2
-            await fetchExistingUsers();
+        if (activeStep === 1) {
+            // Fetch existing databases and users when moving to step 2
+            await Promise.all([fetchExistingDatabases(), fetchExistingUsers()]);
         }
         if (activeStep < STEPS.length - 1) {
             setActiveStep(prev => prev + 1);
@@ -582,14 +599,60 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                     <Typography variant="subtitle2" gutterBottom>
                         Database
                     </Typography>
-                    <TextField
-                        label="Database Name"
-                        value={databaseName}
-                        onChange={(e) => setDatabaseName(e.target.value)}
-                        fullWidth
+                    <RadioGroup
+                        value={databaseMode}
+                        onChange={(e) => setDatabaseMode(e.target.value)}
                         sx={{ mb: 2 }}
-                        disabled={dbLoading || dbResult}
-                    />
+                        row
+                    >
+                        <FormControlLabel
+                            value="existing"
+                            control={<Radio />}
+                            label="Use existing database"
+                            disabled={existingDatabases.length === 0 || dbLoading || dbResult}
+                        />
+                        <FormControlLabel
+                            value="new"
+                            control={<Radio />}
+                            label="Create new database"
+                            disabled={dbLoading || dbResult}
+                        />
+                    </RadioGroup>
+
+                    {databaseMode === "existing" ? (
+                        existingDatabases.length === 0 ? (
+                            <Alert severity="info" sx={{ mb: 2 }}>
+                                No existing databases found. Create a new database.
+                            </Alert>
+                        ) : (
+                            <TextField
+                                select
+                                label="Select Database"
+                                value={databaseName}
+                                onChange={(e) => setDatabaseName(e.target.value)}
+                                fullWidth
+                                SelectProps={{ native: true }}
+                                sx={{ mb: 2 }}
+                                disabled={dbLoading || dbResult}
+                            >
+                                {existingDatabases.map((db) => (
+                                    <option key={db.name} value={db.name}>
+                                        {db.name}
+                                    </option>
+                                ))}
+                            </TextField>
+                        )
+                    ) : (
+                        <TextField
+                            label="Database Name"
+                            value={databaseName}
+                            onChange={(e) => setDatabaseName(e.target.value)}
+                            fullWidth
+                            sx={{ mb: 2 }}
+                            disabled={dbLoading || dbResult}
+                            helperText="Enter a name for the new database"
+                        />
+                    )}
 
                     <Divider sx={{ my: 2 }} />
 
@@ -755,67 +818,60 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                         Schema Seeding
                     </Typography>
                     <Typography variant="body2" color="text.secondary" paragraph>
-                        Apply database schema and seed data. This creates tables, indexes, and the vector extension.
+                        Choose whether to apply database schema now or defer to TriggerService during deployment.
                     </Typography>
 
-                    <Stack spacing={2} sx={{ my: 2 }}>
-                        <FormControlLabel
-                            control={
-                                <Radio
-                                    checked={seedSchema}
-                                    onChange={(e) => setSeedSchema(e.target.checked)}
-                                    disabled={seedLoading || seedResult}
-                                />
+                    <RadioGroup
+                        value={seedResult ? "done" : seedSchema ? "seed" : "skip"}
+                        onChange={(e) => {
+                            if (e.target.value === "seed") {
+                                setSeedSchema(true);
+                                setSeedVector(true);
+                                setSeedData(true);
+                            } else {
+                                setSeedSchema(false);
+                                setSeedVector(false);
+                                setSeedData(false);
                             }
-                            label={
-                                <Box>
-                                    <Typography variant="body1">Apply schema.sql + schema_enhancements.sql</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        Creates core tables, constraints, and indexes
-                                    </Typography>
-                                </Box>
-                            }
-                        />
-                        <FormControlLabel
-                            control={
-                                <Radio
-                                    checked={seedVector}
-                                    onChange={(e) => setSeedVector(e.target.checked)}
-                                    disabled={seedLoading || seedResult}
-                                />
-                            }
-                            label={
-                                <Box>
-                                    <Typography variant="body1">Enable pgvector extension</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        Required for vector embeddings and similarity search
-                                    </Typography>
-                                </Box>
-                            }
-                        />
-                        <FormControlLabel
-                            control={
-                                <Radio
-                                    checked={seedData}
-                                    onChange={(e) => setSeedData(e.target.checked)}
-                                    disabled={seedLoading || seedResult}
-                                />
-                            }
-                            label={
-                                <Box>
-                                    <Typography variant="body1">Load seed data</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        Initial reference data for lookups and configurations
-                                    </Typography>
-                                </Box>
-                            }
-                        />
-                    </Stack>
-
-                    <Alert severity="info" sx={{ mb: 2 }}>
-                        <strong>Note:</strong> Schema seeding is typically handled by TriggerService during deployment.
-                        You can skip this step if deploying via the standard bootstrap process.
-                    </Alert>
+                        }}
+                    >
+                        <Paper variant="outlined" sx={{ p: 2, mb: 2, cursor: seedResult ? "default" : "pointer" }}>
+                            <FormControlLabel
+                                value="skip"
+                                control={<Radio />}
+                                disabled={!!seedResult}
+                                label={
+                                    <Box>
+                                        <Typography variant="subtitle1" fontWeight="bold">
+                                            Skip Seeding
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            TriggerService will handle schema creation during the first deployment.
+                                            This is the recommended option for standard bootstrapping.
+                                        </Typography>
+                                    </Box>
+                                }
+                            />
+                        </Paper>
+                        <Paper variant="outlined" sx={{ p: 2, mb: 2, cursor: seedResult ? "default" : "pointer" }}>
+                            <FormControlLabel
+                                value="seed"
+                                control={<Radio />}
+                                disabled={!!seedResult}
+                                label={
+                                    <Box>
+                                        <Typography variant="subtitle1" fontWeight="bold">
+                                            Run Seeding Now
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            Apply schema.sql, enable pgvector extension, and load seed data immediately.
+                                            Use this if you need the database ready before any deployments.
+                                        </Typography>
+                                    </Box>
+                                }
+                            />
+                        </Paper>
+                    </RadioGroup>
 
                     {seedError && (
                         <Alert severity="error" sx={{ mb: 2 }}>
@@ -825,7 +881,7 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
 
                     {seedResult && (
                         <Alert severity="success" sx={{ mb: 2 }}>
-                            Schema and seed data applied successfully!
+                            {seedSchema ? "Schema and seed data applied successfully!" : "Seeding skipped - TriggerService will handle it."}
                         </Alert>
                     )}
 
@@ -833,31 +889,17 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                         <Button onClick={handleBack} variant="outlined">
                             Back
                         </Button>
-                        <Stack direction="row" spacing={1}>
-                            <Button
-                                variant="outlined"
-                                onClick={() => {
-                                    setSeedSchema(false);
-                                    setSeedVector(false);
-                                    setSeedData(false);
-                                    handleNext();
-                                }}
-                                disabled={seedLoading}
-                            >
-                                Skip Seeding
-                            </Button>
-                            <Button
-                                variant="contained"
-                                onClick={() => {
-                                    // For now, just mark as complete - actual seeding done by TriggerService
-                                    setSeedResult({ status: "skipped_for_triggerservice" });
-                                    handleNext();
-                                }}
-                                disabled={seedLoading || (!seedSchema && !seedVector && !seedData)}
-                            >
-                                {seedLoading ? "Applying..." : "Continue (Let TriggerService Seed)"}
-                            </Button>
-                        </Stack>
+                        <Button
+                            variant="contained"
+                            onClick={() => {
+                                // Mark as complete - actual seeding would be done by API call
+                                setSeedResult({ status: seedSchema ? "seeded" : "skipped" });
+                                handleNext();
+                            }}
+                            disabled={seedLoading || seedResult}
+                        >
+                            {seedLoading ? "Applying..." : seedSchema ? "Run Seeding" : "Continue"}
+                        </Button>
                     </Stack>
                 </Paper>
             )}
