@@ -339,7 +339,7 @@ export default function ProviderSetupPage() {
                 <StepLabel>Bootstrap provider project</StepLabel>
               </Step>
               <Step>
-                <StepLabel>Deploy core agents</StepLabel>
+                <StepLabel>Deploy provider services</StepLabel>
               </Step>
               <Step>
                 <StepLabel>Review provider health</StepLabel>
@@ -516,12 +516,18 @@ export default function ProviderSetupPage() {
             {step === 2 && (
               <Box>
                 <Typography variant="subtitle1" gutterBottom>
-                  Step 3: Deploy core agents (10-agent stack)
+                  Step 3: Deploy provider services
                 </Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
-                  With buckets and databases primed, this step uses the 10-agent deployment script to build and deploy the provider's core agents (ThunderdomeCore, MCP registry, ThunderMCPSQL, broker, WhatsApp handler, etc.).
-                  Start with a dry-run to confirm the graph and then run a real deploy (optionally skipping the slow schedulers).
-                  This wraps <code>deploy_agents_ordered.py</code> via Cloud Build.
+                  With infrastructure primed, this step deploys provider-side control plane services:
+                  <br />
+                  • <strong>TriggerService</strong> – orchestrates Cloud Build deployments for tenants
+                  <br />
+                  • <strong>Thunderfront</strong> – provider dashboard UI for managing tenants
+                  <br />
+                  • <strong>ThunderJob</strong> – background job processor
+                  <br />
+                  <em>Note: Customer-side agents (ThunderdomeCore, MCP, WhatsApp, etc.) are deployed per-tenant from the Tenant Setup page.</em>
                 </Typography>
 
                 <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
@@ -530,7 +536,7 @@ export default function ProviderSetupPage() {
                   </Typography>
                   <ChecklistItem label="Dry-run submitted" done={previewDone || deployDone} />
                   <ChecklistItem
-                    label="Full deploy submitted (core agents)"
+                    label="Full deploy submitted (provider services)"
                     done={deployDone}
                   />
                 </Paper>
