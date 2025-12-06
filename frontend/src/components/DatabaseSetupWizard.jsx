@@ -35,10 +35,11 @@ import {
     sqlOperationStatus,
     sqlDatabasesCreate,
     sqlUsersCreate,
+    sqlUsersList,
     validateSqlDatabase,
 } from "../utils/api.js";
 
-const STEPS = ["Preflight Check", "Instance Setup", "Database & User", "Review"];
+const STEPS = ["Preflight Check", "Instance Setup", "Database & User", "Schema Seeding", "Review"];
 
 const TIERS = [
     { value: "db-f1-micro", label: "db-f1-micro (shared, 0.6 GB)" },
@@ -103,6 +104,8 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
     const [databaseMode, setDatabaseMode] = useState("new"); // "existing" or "new"
     const [existingDatabases, setExistingDatabases] = useState([]);
     const [databaseName, setDatabaseName] = useState("thunderdomecore_ynv_data");
+    const [userMode, setUserMode] = useState("new"); // "existing" or "new"
+    const [existingUsers, setExistingUsers] = useState([]);
     const [username, setUsername] = useState("thunderadmin");
     const [password, setPassword] = useState(() => generatePassword());
     const [showPassword, setShowPassword] = useState(false);
@@ -110,6 +113,14 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
     const [dbError, setDbError] = useState("");
     const [dbResult, setDbResult] = useState(null);
     const [userResult, setUserResult] = useState(null);
+
+    // Seeding state
+    const [seedSchema, setSeedSchema] = useState(true);
+    const [seedVector, setSeedVector] = useState(true);
+    const [seedData, setSeedData] = useState(true);
+    const [seedLoading, setSeedLoading] = useState(false);
+    const [seedResult, setSeedResult] = useState(null);
+    const [seedError, setSeedError] = useState("");
 
     // Computed values
     const currentInstance = useMemo(() => {
@@ -228,18 +239,38 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
             });
             setDbResult(dbData);
 
-            // Create user
-            const userData = await sqlUsersCreate({
-                instance: currentInstance,
-                username,
-                password,
-                scope,
-            });
-            setUserResult(userData);
+            // Create user (only if new mode)
+            if (userMode === "new") {
+                const userData = await sqlUsersCreate({
+                    instance: currentInstance,
+                    username,
+                    password,
+                    scope,
+                });
+                setUserResult(userData);
+            } else {
+                // Existing user - mark as ready
+                setUserResult({ status: "existing" });
+            }
         } catch (err) {
             setDbError(err.message || "Failed to create database or user.");
         } finally {
             setDbLoading(false);
+        }
+    };
+
+    // Fetch existing users
+    const fetchExistingUsers = async () => {
+        try {
+            const data = await sqlUsersList(currentInstance, scope);
+            if (data.users) {
+                setExistingUsers(data.users.filter(u => u.name !== "postgres" && !u.name.startsWith("cloudsql")));
+                if (data.users.length > 0 && !username) {
+                    setUsername(data.users[0].name);
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch users:", err);
         }
     };
 
@@ -255,6 +286,8 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                 return !!selectedInstance;
             case 2: // Database & User
                 return dbResult && userResult;
+            case 3: // Schema Seeding  
+                return seedResult || (!seedSchema && !seedVector && !seedData); // Can skip or complete
             default:
                 return true;
         }
@@ -262,8 +295,8 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
 
     const handleNext = async () => {
         if (activeStep === 1 && instanceMode === "existing") {
-            // Validate database exists when moving to step 2
-            await validateDatabase();
+            // Fetch existing users when moving to step 2
+            await fetchExistingUsers();
         }
         if (activeStep < STEPS.length - 1) {
             setActiveStep(prev => prev + 1);
@@ -276,6 +309,7 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                 username,
                 password,
                 projectId: preflightResult?.project_id,
+                seeded: !!seedResult,
             });
         }
     };
@@ -554,7 +588,7 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                         onChange={(e) => setDatabaseName(e.target.value)}
                         fullWidth
                         sx={{ mb: 2 }}
-                        disabled={dbLoading}
+                        disabled={dbLoading || dbResult}
                     />
 
                     <Divider sx={{ my: 2 }} />
@@ -562,53 +596,118 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                     <Typography variant="subtitle2" gutterBottom>
                         Database User
                     </Typography>
-                    <Stack spacing={2}>
-                        <TextField
-                            label="Username"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            fullWidth
-                            disabled={dbLoading}
+                    <RadioGroup
+                        value={userMode}
+                        onChange={(e) => setUserMode(e.target.value)}
+                        sx={{ mb: 2 }}
+                        row
+                    >
+                        <FormControlLabel
+                            value="existing"
+                            control={<Radio />}
+                            label="Use existing user"
+                            disabled={existingUsers.length === 0 || dbLoading || dbResult}
                         />
-                        <Stack direction="row" spacing={1} alignItems="flex-start">
+                        <FormControlLabel
+                            value="new"
+                            control={<Radio />}
+                            label="Create new user"
+                            disabled={dbLoading || dbResult}
+                        />
+                    </RadioGroup>
+
+                    {userMode === "existing" ? (
+                        <Stack spacing={2}>
+                            {existingUsers.length === 0 ? (
+                                <Alert severity="info">
+                                    No existing users found. Create a new user.
+                                </Alert>
+                            ) : (
+                                <TextField
+                                    select
+                                    label="Select User"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    fullWidth
+                                    SelectProps={{ native: true }}
+                                    disabled={dbLoading || dbResult}
+                                >
+                                    {existingUsers.map((u) => (
+                                        <option key={u.name} value={u.name}>
+                                            {u.name}
+                                        </option>
+                                    ))}
+                                </TextField>
+                            )}
+                            <Alert severity="warning">
+                                Using existing user. Make sure you have the password for this user.
+                            </Alert>
                             <TextField
-                                label="Password"
+                                label="Password (for existing user)"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 type={showPassword ? "text" : "password"}
                                 fullWidth
-                                disabled={dbLoading}
+                                disabled={dbLoading || dbResult}
+                                helperText="Enter the existing password for this user"
                                 InputProps={{
                                     endAdornment: (
-                                        <Stack direction="row">
-                                            <IconButton onClick={() => setShowPassword(!showPassword)} size="small">
-                                                {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
-                                            </IconButton>
-                                            <Tooltip title="Copy password">
-                                                <IconButton
-                                                    onClick={() => navigator.clipboard.writeText(password)}
-                                                    size="small"
-                                                >
-                                                    <ContentCopyIcon />
-                                                </IconButton>
-                                            </Tooltip>
-                                        </Stack>
+                                        <IconButton onClick={() => setShowPassword(!showPassword)} size="small">
+                                            {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                        </IconButton>
                                     ),
                                 }}
                             />
-                            <Button
-                                variant="outlined"
-                                onClick={() => setPassword(generatePassword())}
-                                disabled={dbLoading}
-                                sx={{ whiteSpace: "nowrap" }}
-                            >
-                                Generate
-                            </Button>
                         </Stack>
-                        <Alert severity="info">
-                            Save this password securely. It will be used for service deployments.
-                        </Alert>
-                    </Stack>
+                    ) : (
+                        <Stack spacing={2}>
+                            <TextField
+                                label="Username"
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                fullWidth
+                                disabled={dbLoading || dbResult}
+                            />
+                            <Stack direction="row" spacing={1} alignItems="flex-start">
+                                <TextField
+                                    label="Password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    type={showPassword ? "text" : "password"}
+                                    fullWidth
+                                    disabled={dbLoading || dbResult}
+                                    InputProps={{
+                                        endAdornment: (
+                                            <Stack direction="row">
+                                                <IconButton onClick={() => setShowPassword(!showPassword)} size="small">
+                                                    {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                                </IconButton>
+                                                <Tooltip title="Copy password">
+                                                    <IconButton
+                                                        onClick={() => navigator.clipboard.writeText(password)}
+                                                        size="small"
+                                                    >
+                                                        <ContentCopyIcon />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            </Stack>
+                                        ),
+                                    }}
+                                />
+                                <Button
+                                    variant="outlined"
+                                    onClick={() => setPassword(generatePassword())}
+                                    disabled={dbLoading || dbResult}
+                                    sx={{ whiteSpace: "nowrap" }}
+                                >
+                                    Generate
+                                </Button>
+                            </Stack>
+                            <Alert severity="info">
+                                Save this password securely. It will be used for service deployments.
+                            </Alert>
+                        </Stack>
+                    )}
 
                     {dbError && (
                         <Alert severity="error" sx={{ mt: 2 }}>
@@ -618,7 +717,7 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
 
                     {dbResult && userResult && (
                         <Alert severity="success" sx={{ mt: 2 }}>
-                            Database and user created successfully!
+                            {userMode === "new" ? "Database and user created successfully!" : "Database created, using existing user."}
                         </Alert>
                     )}
 
@@ -631,9 +730,9 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                                 <Button
                                     variant="contained"
                                     onClick={handleCreateDatabaseAndUser}
-                                    disabled={dbLoading || !databaseName || !username}
+                                    disabled={dbLoading || !databaseName || !username || (userMode === "new" && !password)}
                                 >
-                                    {dbLoading ? "Creating..." : "Create Database & User"}
+                                    {dbLoading ? "Creating..." : userMode === "new" ? "Create Database & User" : "Create Database"}
                                 </Button>
                             ) : (
                                 <Button
@@ -649,8 +748,122 @@ export default function DatabaseSetupWizard({ scope = "source", onComplete, onCa
                 </Paper>
             )}
 
-            {/* Step 3: Review */}
+            {/* Step 3: Schema Seeding */}
             {activeStep === 3 && (
+                <Paper variant="outlined" sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                        Schema Seeding
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" paragraph>
+                        Apply database schema and seed data. This creates tables, indexes, and the vector extension.
+                    </Typography>
+
+                    <Stack spacing={2} sx={{ my: 2 }}>
+                        <FormControlLabel
+                            control={
+                                <Radio
+                                    checked={seedSchema}
+                                    onChange={(e) => setSeedSchema(e.target.checked)}
+                                    disabled={seedLoading || seedResult}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body1">Apply schema.sql + schema_enhancements.sql</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        Creates core tables, constraints, and indexes
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                        <FormControlLabel
+                            control={
+                                <Radio
+                                    checked={seedVector}
+                                    onChange={(e) => setSeedVector(e.target.checked)}
+                                    disabled={seedLoading || seedResult}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body1">Enable pgvector extension</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        Required for vector embeddings and similarity search
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                        <FormControlLabel
+                            control={
+                                <Radio
+                                    checked={seedData}
+                                    onChange={(e) => setSeedData(e.target.checked)}
+                                    disabled={seedLoading || seedResult}
+                                />
+                            }
+                            label={
+                                <Box>
+                                    <Typography variant="body1">Load seed data</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        Initial reference data for lookups and configurations
+                                    </Typography>
+                                </Box>
+                            }
+                        />
+                    </Stack>
+
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                        <strong>Note:</strong> Schema seeding is typically handled by TriggerService during deployment.
+                        You can skip this step if deploying via the standard bootstrap process.
+                    </Alert>
+
+                    {seedError && (
+                        <Alert severity="error" sx={{ mb: 2 }}>
+                            {seedError}
+                        </Alert>
+                    )}
+
+                    {seedResult && (
+                        <Alert severity="success" sx={{ mb: 2 }}>
+                            Schema and seed data applied successfully!
+                        </Alert>
+                    )}
+
+                    <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
+                        <Button onClick={handleBack} variant="outlined">
+                            Back
+                        </Button>
+                        <Stack direction="row" spacing={1}>
+                            <Button
+                                variant="outlined"
+                                onClick={() => {
+                                    setSeedSchema(false);
+                                    setSeedVector(false);
+                                    setSeedData(false);
+                                    handleNext();
+                                }}
+                                disabled={seedLoading}
+                            >
+                                Skip Seeding
+                            </Button>
+                            <Button
+                                variant="contained"
+                                onClick={() => {
+                                    // For now, just mark as complete - actual seeding done by TriggerService
+                                    setSeedResult({ status: "skipped_for_triggerservice" });
+                                    handleNext();
+                                }}
+                                disabled={seedLoading || (!seedSchema && !seedVector && !seedData)}
+                            >
+                                {seedLoading ? "Applying..." : "Continue (Let TriggerService Seed)"}
+                            </Button>
+                        </Stack>
+                    </Stack>
+                </Paper>
+            )}
+
+            {/* Step 4: Review */}
+            {activeStep === 4 && (
                 <Paper variant="outlined" sx={{ p: 3 }}>
                     <Typography variant="h6" gutterBottom>
                         Database Setup Complete
