@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -52,6 +52,18 @@ export default function PrimingPage() {
       return "";
     }
   }, [form.saJson]);
+
+  // Auto-populate projectId from selected credential
+  useEffect(() => {
+    if (activeCred?.project_id && !form.projectId) {
+      setForm(prev => ({ ...prev, projectId: activeCred.project_id }));
+    }
+  }, [activeCred, form.projectId]);
+
+  // Check if we have a valid credential (either stored or manual)
+  const hasValidCredential = useMemo(() => {
+    return !!activeCred || !!credentialB64;
+  }, [activeCred, credentialB64]);
 
   const handlePrime = async () => {
     setLoading(true);
@@ -184,12 +196,12 @@ export default function PrimingPage() {
                   variant="contained"
                   startIcon={<PlayArrowIcon />}
                   sx={{ alignSelf: "flex-start" }}
-                  disabled={!credentialB64 || loading}
+                  disabled={!hasValidCredential || loading}
                   onClick={handlePrime}
                 >
                   Run priming
                 </Button>
-                <Button variant="outlined" disabled={!credentialB64 || loading} onClick={handleCheck}>
+                <Button variant="outlined" disabled={!hasValidCredential || loading} onClick={handleCheck}>
                   Check status
                 </Button>
               </Stack>
