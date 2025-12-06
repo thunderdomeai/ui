@@ -236,3 +236,48 @@ export async function runMassDeploy({
     body: JSON.stringify(body),
   });
 }
+
+// --- Database Setup Wizard APIs ---
+
+export async function sqlPreflightCheck(scope = "source") {
+  return fetchJson(`/api/sql/preflight-check?scope=${scope}`);
+}
+
+export async function sqlInstancesList(scope = "source") {
+  return fetchJson(`/api/sql/instances-list?scope=${scope}`);
+}
+
+export async function sqlInstancesCreate({ name, region, tier, databaseVersion, scope = "source" }) {
+  return fetchJson("/api/sql/instances-create", {
+    method: "POST",
+    body: JSON.stringify({
+      name,
+      region: region || "us-central1",
+      tier: tier || "db-f1-micro",
+      database_version: databaseVersion || "POSTGRES_15",
+      scope,
+    }),
+  });
+}
+
+export async function sqlOperationStatus(operationId) {
+  return fetchJson(`/api/sql/operations/${encodeURIComponent(operationId)}`);
+}
+
+export async function sqlDatabasesCreate({ instance, database, scope = "source" }) {
+  return fetchJson("/api/sql/databases-create", {
+    method: "POST",
+    body: JSON.stringify({ instance, database, scope }),
+  });
+}
+
+export async function sqlUsersList(instance, scope = "source") {
+  return fetchJson(`/api/sql/users-list?instance=${encodeURIComponent(instance)}&scope=${scope}`);
+}
+
+export async function sqlUsersCreate({ instance, username, password, scope = "source" }) {
+  return fetchJson("/api/sql/users-create", {
+    method: "POST",
+    body: JSON.stringify({ instance, username, password, scope }),
+  });
+}

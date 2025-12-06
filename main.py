@@ -894,6 +894,426 @@ async def validate_sql_database(instance: Optional[str] = None, database: Option
     )
 
 
+# --- Database Setup Wizard APIs ---
+
+# In-memory operation tracking (for long-running instance creation)
+_sql_operations: Dict[str, Dict[str, Any]] = {}
+
+
+@app.get("/api/sql/preflight-check")
+async def sql_preflight_check(scope: str = "source") -> JSONResponse:
+    """
+    Check permissions and resources for Cloud SQL operations.
+    Returns API status, available permissions, quota, and existing instances.
+    """
+    try:
+        project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    except HTTPException as e:
+        return JSONResponse({
+            "ok": False,
+            "error": str(e.detail),
+            "api_enabled": False,
+            "permissions": {},
+            "quota": {},
+            "existing_instances": [],
+        }, status_code=200)
+
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    result = {
+        "ok": True,
+        "project_id": project_id,
+        "api_enabled": True,
+        "permissions": {
+            "instances_list": False,
+            "instances_create": False,
+            "databases_list": False,
+            "databases_create": False,
+            "users_list": False,
+            "users_create": False,
+        },
+        "quota": {
+            "instances_limit": 10,
+            "instances_used": 0,
+            "instances_available": 10,
+        },
+        "existing_instances": [],
+    }
+
+    # Test permissions by listing instances
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances"
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                result["permissions"]["instances_list"] = True
+                result["permissions"]["instances_create"] = True  # Assume if can list, can create
+                result["permissions"]["databases_list"] = True
+                result["permissions"]["databases_create"] = True
+                result["permissions"]["users_list"] = True
+                result["permissions"]["users_create"] = True
+                
+                payload = resp.json()
+                instances = payload.get("items") or []
+                result["quota"]["instances_used"] = len(instances)
+                result["quota"]["instances_available"] = max(0, 10 - len(instances))
+                
+                for inst in instances:
+                    result["existing_instances"].append({
+                        "name": inst.get("name"),
+                        "region": inst.get("region"),
+                        "status": inst.get("state"),
+                        "database_version": inst.get("databaseVersion"),
+                        "connection_name": inst.get("connectionName"),
+                    })
+            elif resp.status_code == 403:
+                result["ok"] = False
+                result["error"] = "Permission denied. Grant 'Cloud SQL Admin' role to the service account."
+            else:
+                result["ok"] = False
+                result["error"] = f"SQL Admin API returned status {resp.status_code}"
+    except Exception as exc:
+        logger.error("SQL preflight check failed: %s", exc)
+        result["ok"] = False
+        result["error"] = str(exc)
+
+    return JSONResponse(result)
+
+
+@app.get("/api/sql/instances-list")
+async def sql_instances_list(scope: str = "source") -> JSONResponse:
+    """
+    List all Cloud SQL instances for a given scope (source/target).
+    """
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances"
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL instances list request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    payload = resp.json()
+    instances = []
+    for inst in payload.get("items") or []:
+        instances.append({
+            "name": inst.get("name"),
+            "region": inst.get("region"),
+            "status": inst.get("state"),
+            "database_version": inst.get("databaseVersion"),
+            "connection_name": inst.get("connectionName"),
+            "tier": inst.get("settings", {}).get("tier"),
+        })
+
+    return JSONResponse({"project_id": project_id, "instances": instances})
+
+
+@app.post("/api/sql/instances-create")
+async def sql_instances_create(request: Request) -> JSONResponse:
+    """
+    Create a new Cloud SQL instance. Returns operation_id for polling.
+    Instance creation can take 15-30 minutes.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    scope = body.get("scope", "source")
+    instance_name = body.get("name")
+    region = body.get("region", "us-central1")
+    tier = body.get("tier", "db-f1-micro")
+    database_version = body.get("database_version", "POSTGRES_15")
+
+    if not instance_name:
+        raise HTTPException(status_code=400, detail="Instance name is required.")
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances"
+
+    instance_body = {
+        "name": instance_name,
+        "region": region,
+        "databaseVersion": database_version,
+        "settings": {
+            "tier": tier,
+            "ipConfiguration": {
+                "ipv4Enabled": False,
+                "privateNetwork": None,
+            },
+            "backupConfiguration": {
+                "enabled": False,
+            },
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, headers=headers, json=instance_body)
+    except httpx.RequestError as exc:
+        logger.error("SQL instance create request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        payload = resp.json() if resp.content else {}
+        error_msg = payload.get("error", {}).get("message", resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=error_msg)
+
+    payload = resp.json()
+    operation_name = payload.get("name")
+    
+    # Track operation
+    operation_id = f"sql-create-{instance_name}-{int(time.time())}"
+    _sql_operations[operation_id] = {
+        "operation_name": operation_name,
+        "operation_type": "CREATE_INSTANCE",
+        "instance_name": instance_name,
+        "project_id": project_id,
+        "region": region,
+        "status": "RUNNING",
+        "started_at": _now_iso(),
+        "progress_percent": 5,
+        "scope": scope,
+    }
+
+    return JSONResponse({
+        "operation_id": operation_id,
+        "operation_name": operation_name,
+        "instance_name": instance_name,
+        "status": "RUNNING",
+        "estimated_minutes": 20,
+        "message": "Instance creation started. Poll /api/sql/operations/{operation_id} for status.",
+    }, status_code=202)
+
+
+@app.get("/api/sql/operations/{operation_id}")
+async def sql_operation_status(operation_id: str) -> JSONResponse:
+    """
+    Poll status of a long-running SQL operation (e.g., instance creation).
+    """
+    if operation_id not in _sql_operations:
+        raise HTTPException(status_code=404, detail="Operation not found.")
+
+    op = _sql_operations[operation_id]
+    scope = op.get("scope", "source")
+    project_id = op["project_id"]
+    operation_name = op["operation_name"]
+
+    try:
+        _, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    except HTTPException:
+        return JSONResponse({
+            "operation_id": operation_id,
+            "status": "ERROR",
+            "error": "Credential no longer valid.",
+        })
+
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/operations/{operation_name}"
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL operation status request failed: %s", exc)
+        return JSONResponse({
+            "operation_id": operation_id,
+            "status": "UNKNOWN",
+            "error": str(exc),
+        })
+
+    if resp.is_error:
+        return JSONResponse({
+            "operation_id": operation_id,
+            "status": "ERROR",
+            "error": resp.text,
+        })
+
+    payload = resp.json()
+    op_status = payload.get("status")
+    
+    # Calculate elapsed time
+    from datetime import datetime
+    started = datetime.fromisoformat(op["started_at"].replace("Z", "+00:00"))
+    elapsed = (datetime.now(started.tzinfo) - started).total_seconds()
+    
+    # Estimate progress (rough: 20 mins = 1200 seconds)
+    progress = min(95, int((elapsed / 1200) * 100)) if op_status != "DONE" else 100
+
+    result = {
+        "operation_id": operation_id,
+        "operation_type": op["operation_type"],
+        "instance_name": op["instance_name"],
+        "status": op_status,
+        "progress_percent": progress,
+        "elapsed_seconds": int(elapsed),
+        "started_at": op["started_at"],
+    }
+
+    if op_status == "DONE":
+        _sql_operations[operation_id]["status"] = "DONE"
+        _sql_operations[operation_id]["progress_percent"] = 100
+        result["message"] = f"Instance {op['instance_name']} created successfully."
+    elif payload.get("error"):
+        result["status"] = "ERROR"
+        result["error"] = payload.get("error", {}).get("message", "Unknown error")
+
+    return JSONResponse(result)
+
+
+@app.post("/api/sql/databases-create")
+async def sql_databases_create(request: Request) -> JSONResponse:
+    """
+    Create a new database in an existing Cloud SQL instance.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    scope = body.get("scope", "source")
+    instance_name = body.get("instance")
+    database_name = body.get("database")
+
+    if not instance_name or not database_name:
+        raise HTTPException(status_code=400, detail="instance and database are required.")
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance_name}/databases"
+
+    db_body = {
+        "name": database_name,
+        "project": project_id,
+        "instance": instance_name,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=db_body)
+    except httpx.RequestError as exc:
+        logger.error("SQL database create request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        payload = resp.json() if resp.content else {}
+        error_msg = payload.get("error", {}).get("message", resp.text)
+        # Check if database already exists
+        if "already exists" in error_msg.lower():
+            return JSONResponse({
+                "instance": instance_name,
+                "database": database_name,
+                "project_id": project_id,
+                "status": "exists",
+                "message": f"Database {database_name} already exists.",
+            })
+        raise HTTPException(status_code=resp.status_code, detail=error_msg)
+
+    return JSONResponse({
+        "instance": instance_name,
+        "database": database_name,
+        "project_id": project_id,
+        "status": "created",
+        "message": f"Database {database_name} created successfully.",
+    }, status_code=201)
+
+
+@app.get("/api/sql/users-list")
+async def sql_users_list(instance: str, scope: str = "source") -> JSONResponse:
+    """
+    List users for a Cloud SQL instance.
+    """
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance}/users"
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.RequestError as exc:
+        logger.error("SQL users list request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    payload = resp.json()
+    users = []
+    for user in payload.get("items") or []:
+        users.append({
+            "name": user.get("name"),
+            "host": user.get("host"),
+            "type": user.get("type"),
+        })
+
+    return JSONResponse({"project_id": project_id, "instance": instance, "users": users})
+
+
+@app.post("/api/sql/users-create")
+async def sql_users_create(request: Request) -> JSONResponse:
+    """
+    Create a new user in a Cloud SQL instance with password.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    scope = body.get("scope", "source")
+    instance_name = body.get("instance")
+    username = body.get("username")
+    password = body.get("password")
+
+    if not instance_name or not username:
+        raise HTTPException(status_code=400, detail="instance and username are required.")
+
+    project_id, creds = _get_project_and_creds_for_scope(scope, scopes=[SQLADMIN_SCOPE])
+    headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
+    url = f"https://sqladmin.googleapis.com/sql/v1beta4/projects/{project_id}/instances/{instance_name}/users"
+
+    user_body = {
+        "name": username,
+        "password": password or "",
+        "project": project_id,
+        "instance": instance_name,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+            resp = await client.post(url, headers=headers, json=user_body)
+    except httpx.RequestError as exc:
+        logger.error("SQL user create request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to contact Cloud SQL Admin.")
+
+    if resp.is_error:
+        payload = resp.json() if resp.content else {}
+        error_msg = payload.get("error", {}).get("message", resp.text)
+        # Check if user already exists
+        if "already exists" in error_msg.lower():
+            return JSONResponse({
+                "instance": instance_name,
+                "username": username,
+                "project_id": project_id,
+                "status": "exists",
+                "message": f"User {username} already exists. Password not changed.",
+            })
+        raise HTTPException(status_code=resp.status_code, detail=error_msg)
+
+    return JSONResponse({
+        "instance": instance_name,
+        "username": username,
+        "project_id": project_id,
+        "status": "created",
+        "message": f"User {username} created successfully.",
+    }, status_code=201)
+
+
 # --- Provider bootstrap via Cloud Build using the selected source credential ---
 @app.post("/api/bootstrap/provider")
 async def bootstrap_provider(request: Request) -> JSONResponse:

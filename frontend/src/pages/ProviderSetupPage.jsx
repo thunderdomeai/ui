@@ -4,6 +4,10 @@ import {
   Box,
   Button,
   CircularProgress,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  IconButton,
   Link,
   Paper,
   Stack,
@@ -15,8 +19,11 @@ import {
 } from "@mui/material";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import StorageIcon from "@mui/icons-material/Storage";
+import CloseIcon from "@mui/icons-material/Close";
 import PageLayout from "../components/PageLayout.jsx";
 import SectionCard from "../components/SectionCard.jsx";
+import DatabaseSetupWizard from "../components/DatabaseSetupWizard.jsx";
 import { useCredentialStore } from "../hooks/credentials/useCredentialStores.js";
 import { fetchProviderHealth, bootstrapProvider, runMassDeploy, getPrimeStatus, validateSqlDatabase } from "../utils/api.js";
 
@@ -82,6 +89,10 @@ export default function ProviderSetupPage() {
   const [dbValidation, setDbValidation] = useState(null);
   const [dbValidationLoading, setDbValidationLoading] = useState(false);
   const [dbValidationError, setDbValidationError] = useState("");
+
+  // Database Setup Wizard state
+  const [dbWizardOpen, setDbWizardOpen] = useState(false);
+  const [dbConfig, setDbConfig] = useState(null); // { instance, database, username, password, connectionName }
 
   const activeSource = useMemo(
     () => sourceStore.entries.find((entry) => entry.id === sourceStore.selectedId) ?? null,
@@ -310,437 +321,485 @@ export default function ProviderSetupPage() {
   };
 
   return (
-    <PageLayout
-      title="Service Provider Setup"
-      subtitle="Run once per provider project to bootstrap TriggerService, prepare core infra, and deploy the core agent stack."
-    >
-      <SectionCard
-        title="Provider Setup Wizard"
-        subtitle="Guided steps for provider projects using existing credential store and TriggerService workflows."
+    <>
+      <PageLayout
+        title="Service Provider Setup"
+        subtitle="Run once per provider project to bootstrap TriggerService, prepare core infra, and deploy the core agent stack."
       >
-        <Stack spacing={2}>
-          <Stepper activeStep={step} alternativeLabel>
-            <Step>
-              <StepLabel>Priming & credentials</StepLabel>
-            </Step>
-            <Step>
-              <StepLabel>Bootstrap provider project</StepLabel>
-            </Step>
-            <Step>
-              <StepLabel>Deploy core agents</StepLabel>
-            </Step>
-            <Step>
-              <StepLabel>Review provider health</StepLabel>
-            </Step>
-          </Stepper>
+        <SectionCard
+          title="Provider Setup Wizard"
+          subtitle="Guided steps for provider projects using existing credential store and TriggerService workflows."
+        >
+          <Stack spacing={2}>
+            <Stepper activeStep={step} alternativeLabel>
+              <Step>
+                <StepLabel>Priming & credentials</StepLabel>
+              </Step>
+              <Step>
+                <StepLabel>Bootstrap provider project</StepLabel>
+              </Step>
+              <Step>
+                <StepLabel>Deploy core agents</StepLabel>
+              </Step>
+              <Step>
+                <StepLabel>Review provider health</StepLabel>
+              </Step>
+            </Stepper>
 
-          {step === 0 && (
-            <Box>
-              <Typography variant="subtitle1" gutterBottom>
-                Step 1: Priming & credentials
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                In this step we make sure the provider project is ready to be primed:
-                <br />
-                • The provider (source) credential is selected and verified.
-                <br />
-                • The target (tenant) credential is selected.
-                <br />
-                • TriggerService is configured and reachable.
-                <br />
-                Once these are green, the next step will create or verify:
-                <br />
-                • Logs bucket (e.g. <code>{`{project}`}-thunder-deploy-logs</code>) for Cloud Build and deploy logs.
-                <br />
-                • Dashboard storage bucket (if configured) for job history.
-                <br />
-                • Core Cloud SQL instance and DB used by ThunderdomeCore.
-              </Typography>
-
-              {providerHealthLoading ? (
-                <Alert severity="info">Checking provider status…</Alert>
-              ) : providerHealthError ? (
-                <Alert severity="warning">{providerHealthError}</Alert>
-              ) : providerBlocked ? (
-                <Alert severity="error">
-                  Provider setup is blocking deployments. Fix TriggerService configuration or credentials before continuing.
-                </Alert>
-              ) : providerHealthy ? (
-                <Alert severity="success">Provider looks healthy. You can proceed to bootstrap.</Alert>
-              ) : (
-                <Alert severity="warning">
-                  Provider has warnings. You can proceed, but review Deploy/Health pages for details.
-                </Alert>
-              )}
-
-              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Priming prerequisites
-                </Typography>
-                <ChecklistItem
-                  label={`Provider credential selected (${activeSource?.label || "none"})`}
-                  done={providerChecklist.sourceSelected}
-                />
-                <ChecklistItem
-                  label={`Target credential selected (${activeTarget?.label || "none"})`}
-                  done={providerChecklist.targetSelected}
-                />
-                <ChecklistItem
-                  label="TriggerService configured and bound"
-                  done={providerChecklist.triggerserviceConfigured}
-                />
-                <ChecklistItem
-                  label="TriggerService reachable from Unified UI"
-                  done={providerChecklist.triggerserviceReachable}
-                />
-              </Paper>
-
-              <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={refreshProviderHealth}
-                  disabled={providerHealthLoading}
-                >
-                  Refresh
-                </Button>
-                <Button variant="contained" onClick={() => setStep(1)} disabled={!canAdvanceFromStep0}>
-                  Continue
-                </Button>
-              </Stack>
-              {!canAdvanceFromStep0 && (
-                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                  Tip: Use the Credentials, Permissions, and Deploy pages to prime credentials, then refresh.
-                </Typography>
-              )}
-            </Box>
-          )}
-
-          {step === 1 && (
-            <Box>
-              <Typography variant="subtitle1" gutterBottom>
-                Step 2: Bootstrap provider project (priming + core services)
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                This step runs <code>make bootstrap-provider</code> in the thunderdeploy repo using the active provider credential. It:
-                <br />
-                • Ensures the logs bucket (<code>{`gs://${providerProjectId || "project"}-thunder-deploy-logs`}</code>) exists for Cloud Build and deploy logs.
-                <br />
-                • Ensures the job dashboard bucket is created (if enabled) so job history is persisted.
-                <br />
-                • Prepares or verifies the core Cloud SQL instance and provider DB used by ThunderdomeCore.
-                <br />
-                • Deploys or updates TriggerService and any other provider-side control-plane services.
-              </Typography>
-
-              <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Priming checklist (provider project {providerProjectId || "unknown"})
-                </Typography>
-                <ChecklistItem
-                  label="Logs bucket created/verified (e.g. <project>-thunder-deploy-logs)"
-                  done={!!bootstrapResult}
-                />
-                <ChecklistItem label="Dashboard bucket created/verified (if configured)" done={!!bootstrapResult} />
-                <ChecklistItem label="Core Cloud SQL instance and DB prepared (thunderdome / thunderdomecore_ynv_data)" done={!!bootstrapResult} />
-                <ChecklistItem label="TriggerService and core control-plane services deployed/updated" done={!!bootstrapResult} />
-              </Paper>
-
-              <Button
-                variant="contained"
-                startIcon={bootstrapLoading ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                disabled={bootstrapLoading || !providerProjectId}
-                onClick={handleRunBootstrap}
-              >
-                {bootstrapLoading ? "Starting bootstrap…" : "Run bootstrap"}
-              </Button>
-
-              {bootstrapError ? (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {bootstrapError}
-                </Alert>
-              ) : null}
-              {bootstrapResult ? (
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  Bootstrap build {bootstrapResult.buildId || "submitted"} ({bootstrapResult.status || "QUEUED"}).{" "}
-                  {bootstrapResult.logUrl ? (
-                    <Link href={bootstrapResult.logUrl} target="_blank" rel="noopener noreferrer">
-                      View Cloud Build logs
-                    </Link>
-                  ) : null}
-                </Alert>
-              ) : null}
-
-              <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
-                <Button variant="outlined" onClick={() => setStep(0)}>
-                  Back
-                </Button>
-                <Button variant="contained" onClick={() => setStep(2)} disabled={!bootstrapResult}>
-                  Continue
-                </Button>
-              </Stack>
-            </Box>
-          )}
-
-          {step === 2 && (
-            <Box>
-              <Typography variant="subtitle1" gutterBottom>
-                Step 3: Deploy core agents (10-agent stack)
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                With buckets and databases primed, this step uses the 10-agent deployment script to build and deploy the provider's core agents (ThunderdomeCore, MCP registry, ThunderMCPSQL, broker, WhatsApp handler, etc.).
-                Start with a dry-run to confirm the graph and then run a real deploy (optionally skipping the slow schedulers).
-                This wraps <code>deploy_agents_ordered.py</code> via Cloud Build.
-              </Typography>
-
-              <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Planned operations
-                </Typography>
-                <ChecklistItem label="Dry-run submitted" done={previewDone || deployDone} />
-                <ChecklistItem
-                  label="Full deploy submitted (core agents)"
-                  done={deployDone}
-                />
-              </Paper>
-
-              <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-                <Button
-                  variant={massDeployDryRun ? "contained" : "outlined"}
-                  size="small"
-                  onClick={() => setMassDeployDryRun(true)}
-                >
-                  Preview (dry-run)
-                </Button>
-                <Button
-                  variant={!massDeployDryRun ? "contained" : "outlined"}
-                  size="small"
-                  onClick={() => setMassDeployDryRun(false)}
-                >
-                  Run deploy
-                </Button>
-                <Button
-                  variant={massDeployIncludeSchedulers ? "contained" : "outlined"}
-                  size="small"
-                  onClick={() => setMassDeployIncludeSchedulers((prev) => !prev)}
-                >
-                  {massDeployIncludeSchedulers ? "Including schedulers" : "Skip schedulers"}
-                </Button>
-              </Stack>
-
-              <Button
-                variant="contained"
-                startIcon={massDeployLoading ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
-                disabled={massDeployLoading}
-                onClick={handleRunMassDeploy}
-              >
-                {massDeployLoading
-                  ? massDeployDryRun
-                    ? "Starting dry-run…"
-                    : "Starting deploy…"
-                  : massDeployDryRun
-                    ? "Preview (dry-run)"
-                    : "Run deploy"}
-              </Button>
-
-              {massDeployError ? (
-                <Alert severity="error" sx={{ mt: 2 }}>
-                  {massDeployError}
-                </Alert>
-              ) : null}
-              {massDeployResult ? (
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  {massDeployResult.dryRun || massDeployResult.dry_run ? "Dry-run" : "Deploy"} build{" "}
-                  {massDeployResult.buildId || massDeployResult.id || "submitted"} ({massDeployResult.status || "QUEUED"}).{" "}
-                  {massDeployResult.logUrl ? (
-                    <Link href={massDeployResult.logUrl} target="_blank" rel="noopener noreferrer">
-                      View Cloud Build logs
-                    </Link>
-                  ) : null}
-                </Alert>
-              ) : null}
-
-              <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
-                <Button variant="outlined" onClick={() => setStep(1)}>
-                  Back
-                </Button>
-                <Button variant="contained" onClick={() => setStep(3)} disabled={!deployDone}>
-                  Continue
-                </Button>
-              </Stack>
-            </Box>
-          )}
-
-          {step === 3 && (
-            <Box>
-              <Typography variant="subtitle1" gutterBottom>
-                Step 4: Review provider health and endpoints
-              </Typography>
-              <Typography variant="body2" color="text.secondary" paragraph>
-                At this point the provider project should have:
-                <br />
-                • TriggerService deployed and reachable.
-                <br />
-                • Core DB ready and used by ThunderdomeCore.
-                <br />
-                • Core agents deployed (registry, broker, WhatsApp handler, etc.).
-                <br />
-                Use the Health and Tenants views to inspect endpoints:
-                <br />
-                • Health dashboard shows service readiness per tenant.
-                <br />
-                • Tenants & Deployments shows per-service URLs and status via TriggerService.
-              </Typography>
-
-              {providerHealthLoading ? (
-                <Alert severity="info">Refreshing provider health…</Alert>
-              ) : providerHealthError ? (
-                <Alert severity="warning">{providerHealthError}</Alert>
-              ) : providerBlocked ? (
-                <Alert severity="error">Provider still has blocking issues. Fix them before onboarding tenants.</Alert>
-              ) : providerHealthy ? (
-                <Alert severity="success">Provider looks healthy. You can start tenant onboarding.</Alert>
-              ) : (
-                <Alert severity="warning">Provider has warnings; monitor deployments closely.</Alert>
-              )}
-
-              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Status checklist
-                </Typography>
-                <ChecklistItem label="TriggerService configured" done={!!triggerservice.configured} />
-                <ChecklistItem label="TriggerService reachable" done={!!triggerservice.reachable} />
-                <ChecklistItem label="Source credential present" done={!!activeSource} />
-                <ChecklistItem label="Target credential present" done={!!activeTarget} />
-              </Paper>
-
-              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Provider readiness (buckets, queues, jobs, IAM)
-                </Typography>
-                {primeStatusLoading ? (
-                  <Alert severity="info">Checking provider resources…</Alert>
-                ) : primeStatusError ? (
-                  <Alert severity="warning">{primeStatusError}</Alert>
-                ) : !providerProjectId || !activeSource ? (
-                  <Typography variant="body2" color="text.secondary">
-                    Select an active provider (source) credential to run readiness checks.
-                  </Typography>
-                ) : primeStatus && readinessSummary ? (
-                  <>
-                    <ChecklistItem
-                      label={`Buckets ready (missing: ${readinessSummary.missingBuckets}, errors: ${readinessSummary.errorBuckets})`}
-                      done={readinessSummary.missingBuckets === 0 && readinessSummary.errorBuckets === 0}
-                    />
-                    <ChecklistItem
-                      label={`Service accounts & roles ready (missing: ${readinessSummary.missingServiceAccounts}, errors: ${readinessSummary.errorServiceAccounts})`}
-                      done={readinessSummary.missingServiceAccounts === 0 && readinessSummary.errorServiceAccounts === 0}
-                    />
-                    <ChecklistItem
-                      label={`Cloud Tasks queues ready (missing: ${readinessSummary.missingQueues}, errors: ${readinessSummary.errorQueues})`}
-                      done={readinessSummary.missingQueues === 0 && readinessSummary.errorQueues === 0}
-                    />
-                    <ChecklistItem
-                      label={`Cloud Scheduler jobs ready (missing: ${readinessSummary.missingJobs}, errors: ${readinessSummary.errorJobs})`}
-                      done={readinessSummary.missingJobs === 0 && readinessSummary.errorJobs === 0}
-                    />
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      Source: TriggerService <code>prime-status</code> for project {primeStatus.project_id} in region{" "}
-                      {primeStatus.region}.
-                    </Typography>
-                  </>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    Readiness checks have not run yet.
-                  </Typography>
-                )}
-              </Paper>
-
-              <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  Core provider database
+            {step === 0 && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Step 1: Priming & credentials
                 </Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
-                  Verify that the core Cloud SQL database exists and is accessible to the provider credential.
+                  In this step we make sure the provider project is ready to be primed:
+                  <br />
+                  • The provider (source) credential is selected and verified.
+                  <br />
+                  • The target (tenant) credential is selected.
+                  <br />
+                  • TriggerService is configured and reachable.
+                  <br />
+                  Once these are green, the next step will create or verify:
+                  <br />
+                  • Logs bucket (e.g. <code>{`{project}`}-thunder-deploy-logs</code>) for Cloud Build and deploy logs.
+                  <br />
+                  • Dashboard storage bucket (if configured) for job history.
+                  <br />
+                  • Core Cloud SQL instance and DB used by ThunderdomeCore.
                 </Typography>
 
-                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-                  <TextField
-                    label="Instance"
-                    value={dbInstance}
-                    onChange={(e) => setDbInstance(e.target.value)}
-                    size="small"
-                    fullWidth
-                    helperText="Format: instance-name or project:region:instance"
-                    disabled={dbValidationLoading}
+                {providerHealthLoading ? (
+                  <Alert severity="info">Checking provider status…</Alert>
+                ) : providerHealthError ? (
+                  <Alert severity="warning">{providerHealthError}</Alert>
+                ) : providerBlocked ? (
+                  <Alert severity="error">
+                    Provider setup is blocking deployments. Fix TriggerService configuration or credentials before continuing.
+                  </Alert>
+                ) : providerHealthy ? (
+                  <Alert severity="success">Provider looks healthy. You can proceed to bootstrap.</Alert>
+                ) : (
+                  <Alert severity="warning">
+                    Provider has warnings. You can proceed, but review Deploy/Health pages for details.
+                  </Alert>
+                )}
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Priming prerequisites
+                  </Typography>
+                  <ChecklistItem
+                    label={`Provider credential selected (${activeSource?.label || "none"})`}
+                    done={providerChecklist.sourceSelected}
                   />
-                  <TextField
-                    label="Database"
-                    value={dbDatabase}
-                    onChange={(e) => setDbDatabase(e.target.value)}
-                    size="small"
-                    fullWidth
-                    disabled={dbValidationLoading}
+                  <ChecklistItem
+                    label={`Target credential selected (${activeTarget?.label || "none"})`}
+                    done={providerChecklist.targetSelected}
                   />
+                  <ChecklistItem
+                    label="TriggerService configured and bound"
+                    done={providerChecklist.triggerserviceConfigured}
+                  />
+                  <ChecklistItem
+                    label="TriggerService reachable from Unified UI"
+                    done={providerChecklist.triggerserviceReachable}
+                  />
+                </Paper>
+
+                <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
                   <Button
                     variant="outlined"
-                    onClick={checkDbReadiness}
-                    disabled={dbValidationLoading || !dbInstance || !dbDatabase}
-                    size="small"
-                    sx={{ minWidth: 100 }}
+                    startIcon={<RefreshIcon />}
+                    onClick={refreshProviderHealth}
+                    disabled={providerHealthLoading}
                   >
-                    {dbValidationLoading ? "Checking..." : "Check"}
+                    Refresh
+                  </Button>
+                  <Button variant="contained" onClick={() => setStep(1)} disabled={!canAdvanceFromStep0}>
+                    Continue
                   </Button>
                 </Stack>
-
-                {dbValidationLoading ? (
-                  <Alert severity="info">Validating provider database…</Alert>
-                ) : dbValidationError ? (
-                  <Alert severity="warning">{dbValidationError}</Alert>
-                ) : dbValidation ? (
-                  <>
-                    <ChecklistItem
-                      label={`Database ${dbValidation.status === "exists" ? "ready" : dbValidation.status === "instance_not_found" ? "instance not found" : "missing"} (${dbInstance}/${dbDatabase})`}
-                      done={dbValidation.status === "exists"}
-                    />
-                    <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
-                      {dbValidation.message}
-                    </Typography>
-                  </>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">
-                    Click "Check" to validate the database.
+                {!canAdvanceFromStep0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                    Tip: Use the Credentials, Permissions, and Deploy pages to prime credentials, then refresh.
                   </Typography>
                 )}
-              </Paper>
+              </Box>
+            )}
 
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }} paragraph>
-                Next steps: open the <Link href="/deploy">Deploy</Link> and <Link href="/health">Health</Link> pages to monitor services,
-                or proceed to <Link href="/tenant-setup">Tenant Setup</Link> to onboard customers.
-              </Typography>
+            {step === 1 && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Step 2: Bootstrap provider project (priming + core services)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  This step runs <code>make bootstrap-provider</code> in the thunderdeploy repo using the active provider credential. It:
+                  <br />
+                  • Ensures the logs bucket (<code>{`gs://${providerProjectId || "project"}-thunder-deploy-logs`}</code>) exists for Cloud Build and deploy logs.
+                  <br />
+                  • Ensures the job dashboard bucket is created (if enabled) so job history is persisted.
+                  <br />
+                  • Prepares or verifies the core Cloud SQL instance and provider DB used by ThunderdomeCore.
+                  <br />
+                  • Deploys or updates TriggerService and any other provider-side control-plane services.
+                </Typography>
 
-              <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
-                <Button variant="outlined" onClick={() => setStep(2)}>
-                  Back
-                </Button>
-                <Stack direction="row" spacing={1}>
-                  <Button variant="outlined" onClick={refreshProviderHealth}>
-                    Refresh health
-                  </Button>
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Priming checklist (provider project {providerProjectId || "unknown"})
+                  </Typography>
+                  <ChecklistItem
+                    label="Logs bucket created/verified (e.g. <project>-thunder-deploy-logs)"
+                    done={!!bootstrapResult}
+                  />
+                  <ChecklistItem label="Dashboard bucket created/verified (if configured)" done={!!bootstrapResult} />
+                  <ChecklistItem
+                    label={dbConfig ? `Cloud SQL: ${dbConfig.instance}/${dbConfig.database} (ready)` : "Core Cloud SQL instance and DB (click Setup Database)"}
+                    done={!!dbConfig}
+                  />
+                  <ChecklistItem label="TriggerService and core control-plane services deployed/updated" done={!!bootstrapResult} />
+                </Paper>
+
+                <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
                   <Button
-                    variant="contained"
-                    onClick={refreshPrimeStatus}
-                    disabled={primeStatusLoading}
-                    aria-label="Refresh provider readiness checks for buckets, queues, service accounts, and Cloud Scheduler jobs"
+                    variant="outlined"
+                    startIcon={<StorageIcon />}
+                    onClick={() => setDbWizardOpen(true)}
+                    color={dbConfig ? "success" : "primary"}
                   >
-                    {primeStatusLoading ? "Checking readiness…" : "Refresh readiness"}
+                    {dbConfig ? "Database Ready ✓" : "Setup Database"}
+                  </Button>
+                  {dbConfig && (
+                    <Typography variant="body2" color="text.secondary" sx={{ alignSelf: "center" }}>
+                      {dbConfig.connectionName}
+                    </Typography>
+                  )}
+                </Stack>
+
+                <Button
+                  variant="contained"
+                  startIcon={bootstrapLoading ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                  disabled={bootstrapLoading || !providerProjectId}
+                  onClick={handleRunBootstrap}
+                >
+                  {bootstrapLoading ? "Starting bootstrap…" : "Run bootstrap"}
+                </Button>
+
+                {bootstrapError ? (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {bootstrapError}
+                  </Alert>
+                ) : null}
+                {bootstrapResult ? (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    Bootstrap build {bootstrapResult.buildId || "submitted"} ({bootstrapResult.status || "QUEUED"}).{" "}
+                    {bootstrapResult.logUrl ? (
+                      <Link href={bootstrapResult.logUrl} target="_blank" rel="noopener noreferrer">
+                        View Cloud Build logs
+                      </Link>
+                    ) : null}
+                  </Alert>
+                ) : null}
+
+                <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
+                  <Button variant="outlined" onClick={() => setStep(0)}>
+                    Back
+                  </Button>
+                  <Button variant="contained" onClick={() => setStep(2)} disabled={!bootstrapResult}>
+                    Continue
                   </Button>
                 </Stack>
-              </Stack>
-            </Box>
-          )}
-        </Stack>
-      </SectionCard>
-    </PageLayout>
+              </Box>
+            )}
+
+            {step === 2 && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Step 3: Deploy core agents (10-agent stack)
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  With buckets and databases primed, this step uses the 10-agent deployment script to build and deploy the provider's core agents (ThunderdomeCore, MCP registry, ThunderMCPSQL, broker, WhatsApp handler, etc.).
+                  Start with a dry-run to confirm the graph and then run a real deploy (optionally skipping the slow schedulers).
+                  This wraps <code>deploy_agents_ordered.py</code> via Cloud Build.
+                </Typography>
+
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Planned operations
+                  </Typography>
+                  <ChecklistItem label="Dry-run submitted" done={previewDone || deployDone} />
+                  <ChecklistItem
+                    label="Full deploy submitted (core agents)"
+                    done={deployDone}
+                  />
+                </Paper>
+
+                <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+                  <Button
+                    variant={massDeployDryRun ? "contained" : "outlined"}
+                    size="small"
+                    onClick={() => setMassDeployDryRun(true)}
+                  >
+                    Preview (dry-run)
+                  </Button>
+                  <Button
+                    variant={!massDeployDryRun ? "contained" : "outlined"}
+                    size="small"
+                    onClick={() => setMassDeployDryRun(false)}
+                  >
+                    Run deploy
+                  </Button>
+                  <Button
+                    variant={massDeployIncludeSchedulers ? "contained" : "outlined"}
+                    size="small"
+                    onClick={() => setMassDeployIncludeSchedulers((prev) => !prev)}
+                  >
+                    {massDeployIncludeSchedulers ? "Including schedulers" : "Skip schedulers"}
+                  </Button>
+                </Stack>
+
+                <Button
+                  variant="contained"
+                  startIcon={massDeployLoading ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                  disabled={massDeployLoading}
+                  onClick={handleRunMassDeploy}
+                >
+                  {massDeployLoading
+                    ? massDeployDryRun
+                      ? "Starting dry-run…"
+                      : "Starting deploy…"
+                    : massDeployDryRun
+                      ? "Preview (dry-run)"
+                      : "Run deploy"}
+                </Button>
+
+                {massDeployError ? (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {massDeployError}
+                  </Alert>
+                ) : null}
+                {massDeployResult ? (
+                  <Alert severity="info" sx={{ mt: 2 }}>
+                    {massDeployResult.dryRun || massDeployResult.dry_run ? "Dry-run" : "Deploy"} build{" "}
+                    {massDeployResult.buildId || massDeployResult.id || "submitted"} ({massDeployResult.status || "QUEUED"}).{" "}
+                    {massDeployResult.logUrl ? (
+                      <Link href={massDeployResult.logUrl} target="_blank" rel="noopener noreferrer">
+                        View Cloud Build logs
+                      </Link>
+                    ) : null}
+                  </Alert>
+                ) : null}
+
+                <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
+                  <Button variant="outlined" onClick={() => setStep(1)}>
+                    Back
+                  </Button>
+                  <Button variant="contained" onClick={() => setStep(3)} disabled={!deployDone}>
+                    Continue
+                  </Button>
+                </Stack>
+              </Box>
+            )}
+
+            {step === 3 && (
+              <Box>
+                <Typography variant="subtitle1" gutterBottom>
+                  Step 4: Review provider health and endpoints
+                </Typography>
+                <Typography variant="body2" color="text.secondary" paragraph>
+                  At this point the provider project should have:
+                  <br />
+                  • TriggerService deployed and reachable.
+                  <br />
+                  • Core DB ready and used by ThunderdomeCore.
+                  <br />
+                  • Core agents deployed (registry, broker, WhatsApp handler, etc.).
+                  <br />
+                  Use the Health and Tenants views to inspect endpoints:
+                  <br />
+                  • Health dashboard shows service readiness per tenant.
+                  <br />
+                  • Tenants & Deployments shows per-service URLs and status via TriggerService.
+                </Typography>
+
+                {providerHealthLoading ? (
+                  <Alert severity="info">Refreshing provider health…</Alert>
+                ) : providerHealthError ? (
+                  <Alert severity="warning">{providerHealthError}</Alert>
+                ) : providerBlocked ? (
+                  <Alert severity="error">Provider still has blocking issues. Fix them before onboarding tenants.</Alert>
+                ) : providerHealthy ? (
+                  <Alert severity="success">Provider looks healthy. You can start tenant onboarding.</Alert>
+                ) : (
+                  <Alert severity="warning">Provider has warnings; monitor deployments closely.</Alert>
+                )}
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Status checklist
+                  </Typography>
+                  <ChecklistItem label="TriggerService configured" done={!!triggerservice.configured} />
+                  <ChecklistItem label="TriggerService reachable" done={!!triggerservice.reachable} />
+                  <ChecklistItem label="Source credential present" done={!!activeSource} />
+                  <ChecklistItem label="Target credential present" done={!!activeTarget} />
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Provider readiness (buckets, queues, jobs, IAM)
+                  </Typography>
+                  {primeStatusLoading ? (
+                    <Alert severity="info">Checking provider resources…</Alert>
+                  ) : primeStatusError ? (
+                    <Alert severity="warning">{primeStatusError}</Alert>
+                  ) : !providerProjectId || !activeSource ? (
+                    <Typography variant="body2" color="text.secondary">
+                      Select an active provider (source) credential to run readiness checks.
+                    </Typography>
+                  ) : primeStatus && readinessSummary ? (
+                    <>
+                      <ChecklistItem
+                        label={`Buckets ready (missing: ${readinessSummary.missingBuckets}, errors: ${readinessSummary.errorBuckets})`}
+                        done={readinessSummary.missingBuckets === 0 && readinessSummary.errorBuckets === 0}
+                      />
+                      <ChecklistItem
+                        label={`Service accounts & roles ready (missing: ${readinessSummary.missingServiceAccounts}, errors: ${readinessSummary.errorServiceAccounts})`}
+                        done={readinessSummary.missingServiceAccounts === 0 && readinessSummary.errorServiceAccounts === 0}
+                      />
+                      <ChecklistItem
+                        label={`Cloud Tasks queues ready (missing: ${readinessSummary.missingQueues}, errors: ${readinessSummary.errorQueues})`}
+                        done={readinessSummary.missingQueues === 0 && readinessSummary.errorQueues === 0}
+                      />
+                      <ChecklistItem
+                        label={`Cloud Scheduler jobs ready (missing: ${readinessSummary.missingJobs}, errors: ${readinessSummary.errorJobs})`}
+                        done={readinessSummary.missingJobs === 0 && readinessSummary.errorJobs === 0}
+                      />
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        Source: TriggerService <code>prime-status</code> for project {primeStatus.project_id} in region{" "}
+                        {primeStatus.region}.
+                      </Typography>
+                    </>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      Readiness checks have not run yet.
+                    </Typography>
+                  )}
+                </Paper>
+
+                <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Core provider database
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" paragraph>
+                    Verify that the core Cloud SQL database exists and is accessible to the provider credential.
+                  </Typography>
+
+                  <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+                    <TextField
+                      label="Instance"
+                      value={dbInstance}
+                      onChange={(e) => setDbInstance(e.target.value)}
+                      size="small"
+                      fullWidth
+                      helperText="Format: instance-name or project:region:instance"
+                      disabled={dbValidationLoading}
+                    />
+                    <TextField
+                      label="Database"
+                      value={dbDatabase}
+                      onChange={(e) => setDbDatabase(e.target.value)}
+                      size="small"
+                      fullWidth
+                      disabled={dbValidationLoading}
+                    />
+                    <Button
+                      variant="outlined"
+                      onClick={checkDbReadiness}
+                      disabled={dbValidationLoading || !dbInstance || !dbDatabase}
+                      size="small"
+                      sx={{ minWidth: 100 }}
+                    >
+                      {dbValidationLoading ? "Checking..." : "Check"}
+                    </Button>
+                  </Stack>
+
+                  {dbValidationLoading ? (
+                    <Alert severity="info">Validating provider database…</Alert>
+                  ) : dbValidationError ? (
+                    <Alert severity="warning">{dbValidationError}</Alert>
+                  ) : dbValidation ? (
+                    <>
+                      <ChecklistItem
+                        label={`Database ${dbValidation.status === "exists" ? "ready" : dbValidation.status === "instance_not_found" ? "instance not found" : "missing"} (${dbInstance}/${dbDatabase})`}
+                        done={dbValidation.status === "exists"}
+                      />
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: "block" }}>
+                        {dbValidation.message}
+                      </Typography>
+                    </>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">
+                      Click "Check" to validate the database.
+                    </Typography>
+                  )}
+                </Paper>
+
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }} paragraph>
+                  Next steps: open the <Link href="/deploy">Deploy</Link> and <Link href="/health">Health</Link> pages to monitor services,
+                  or proceed to <Link href="/tenant-setup">Tenant Setup</Link> to onboard customers.
+                </Typography>
+
+                <Stack direction="row" spacing={1} justifyContent="space-between" sx={{ mt: 2 }}>
+                  <Button variant="outlined" onClick={() => setStep(2)}>
+                    Back
+                  </Button>
+                  <Stack direction="row" spacing={1}>
+                    <Button variant="outlined" onClick={refreshProviderHealth}>
+                      Refresh health
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={refreshPrimeStatus}
+                      disabled={primeStatusLoading}
+                      aria-label="Refresh provider readiness checks for buckets, queues, service accounts, and Cloud Scheduler jobs"
+                    >
+                      {primeStatusLoading ? "Checking readiness…" : "Refresh readiness"}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </Box>
+            )}
+          </Stack>
+        </SectionCard>
+      </PageLayout>
+
+      {/* Database Setup Wizard Dialog */}
+      <Dialog
+        open={dbWizardOpen}
+        onClose={() => setDbWizardOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          Database Setup Wizard
+          <IconButton onClick={() => setDbWizardOpen(false)} size="small">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent>
+          <DatabaseSetupWizard
+            scope="source"
+            onComplete={(config) => {
+              setDbConfig(config);
+              setDbInstance(config.instance);
+              setDbDatabase(config.database);
+              setDbWizardOpen(false);
+            }}
+            onCancel={() => setDbWizardOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
